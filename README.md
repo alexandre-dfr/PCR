@@ -209,15 +209,31 @@ Le PDF est déposé à côté du HTML (`output\PingCastleDashboard.pdf`). Le ren
 il n'y a donc rien à ajouter sur le poste. Si aucun des deux navigateurs n'est trouvé, le
 script le signale et le HTML reste évidemment exploitable.
 
-**Depuis le tableau de bord** — le bouton « Imprimer / PDF » en haut à droite bascule la
-page en document paginé, puis ouvre la boîte d'impression du navigateur : choisissez
-**« Enregistrer au format PDF »** comme destination.
+**Depuis le tableau de bord** — avec `-Pdf`, le PDF est **embarqué dans le HTML** : le
+bouton « Télécharger le PDF » en haut à droite dépose directement le fichier dans vos
+téléchargements. Pas de boîte d'impression, pas de destination à choisir. C'est le même
+fichier, au bit près, que celui écrit dans `output\`.
 
-C'est bien une impression, pas un export : aucun navigateur n'autorise une page à écrire
-un fichier PDF sur le disque, la boîte d'impression est le seul chemin. Le bouton le
-rappelle au moment du clic. Pour un vrai PDF déposé sur le disque en une commande, c'est
-`-Pdf` — le script pilote alors Edge en headless, qui fait exactement la même chose sans
-interface.
+Ce bouton n'apparaît que si le rapport a été généré avec `-Pdf`. Sans lui, le HTML ne
+contient aucun PDF à livrer et le bouton retombe sur « Imprimer / PDF », qui ouvre la boîte
+d'impression du navigateur — il faut alors choisir *Enregistrer au format PDF* comme
+destination, ce que le bouton rappelle au moment du clic. Aucune page web ne peut écrire un
+fichier PDF sans passer par là ; c'est pourquoi le PDF est pré-rendu côté script.
+
+### Poids du fichier
+
+Embarquer le PDF fait grossir le HTML : 247 Ko à vide, **3,4 Mo** avec le PDF de 55 pages du
+jeu d'exemple. C'est le prix du téléchargement en un clic depuis un fichier autonome.
+
+Si le tableau de bord doit rester léger — publication sur un partage, envoi par mail —
+`-NoEmbedPdf` produit quand même le `.pdf` à côté, mais laisse le HTML à sa taille normale :
+
+```powershell
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf -NoEmbedPdf
+```
+
+`-PdfSummary` est l'autre levier : 13 pages au lieu de 55, donc un HTML embarqué autour de
+1,2 Mo.
 
 ### Ce que contient le PDF
 
