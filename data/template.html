@@ -340,10 +340,14 @@ body.print-mode .doc-h .dh-s{font-size:12px;color:var(--muted);margin-left:auto}
       <div><div class="crumb" id="crumb"></div><h2 id="ptitle"></h2></div>
       <div class="spacer"></div>
       <button class="btn" id="theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><span>Thème</span></button>
-      <button class="btn primary" id="printbtn"
-        title="Ouvre la boîte d’impression du navigateur. Choisissez « Enregistrer au format PDF » comme destination.">
+      <button class="btn" id="printbtn"
+        title="Ouvre la boîte d’impression du navigateur.">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z"/></svg>
-        <span>Imprimer / PDF</span></button>
+        <span id="printlabel">Imprimer</span></button>
+      <button class="btn primary" id="pdfbtn" style="display:none"
+        title="Télécharge le rapport PDF complet embarqué dans ce fichier.">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 12l5 5 5-5M4 21h16"/></svg>
+        <span>Télécharger le PDF</span></button>
     </div>
     <div class="content">
       <div class="cover" id="cover"></div>
@@ -362,6 +366,10 @@ body.print-mode .doc-h .dh-s{font-size:12px;color:var(--muted);margin-left:auto}
 "use strict";
 var PCD = __PCD_DATA__;
 var PCD_LOGO = "__PCD_LOGO__";
+/* Rapport PDF embarqué (base64), produit par New-PingCastleDashboard.ps1 -Pdf.
+   Vide si le rapport a été généré sans PDF : le bouton bascule alors sur l'impression. */
+var PCD_PDF = "__PCD_PDF__";
+var PCD_PDF_NAME = "__PCD_PDFNAME__";
 </script>
 <script>
 __PCD_APP__

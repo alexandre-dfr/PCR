@@ -1158,14 +1158,38 @@ function tabsFooter(d) {
     CHARTS.forEach(function (f) { f(); });
   });
 
-  // Un navigateur ne peut pas écrire un fichier PDF sur le disque : le seul chemin
-  // est sa boîte d'impression, destination « Enregistrer au format PDF ». On le dit
-  // explicitement plutôt que de laisser croire à un export en un clic — celui-là,
-  // c'est New-PingCastleDashboard.ps1 -Pdf qui le fait.
+  /* Téléchargement du PDF embarqué : un vrai fichier, sans boîte d'impression.
+     Le PDF a été rendu par le script au moment de la génération et inséré dans
+     cette page ; on le restitue tel quel via un Blob. */
+  if (PCD_PDF) {
+    var pdfbtn = byId("pdfbtn");
+    pdfbtn.style.display = "";
+    pdfbtn.addEventListener("click", function () {
+      var bin = atob(PCD_PDF);
+      var buf = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = PCD_PDF_NAME || "rapport.pdf";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); a.parentNode.removeChild(a); }, 2000);
+    });
+  }
+  else {
+    // Sans PDF embarqué, une page web ne peut pas écrire de fichier : le seul
+    // chemin est la boîte d'impression, destination « Enregistrer au format PDF ».
+    byId("printlabel").textContent = "Imprimer / PDF";
+    byId("printbtn").classList.add("primary");
+    byId("printbtn").title =
+      "Ouvre la boîte d’impression : choisissez « Enregistrer au format PDF » comme destination.";
+  }
+
   byId("printbtn").addEventListener("click", function () {
     var toast = byId("toast");
     buildPrintDocument();
-    toast.classList.add("on");
+    if (!PCD_PDF) toast.classList.add("on");
 
     var done = function () {
       window.removeEventListener("afterprint", done);

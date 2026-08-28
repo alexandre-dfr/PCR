@@ -47,6 +47,10 @@
 .PARAMETER PdfSummary
     Comme -Pdf, mais limite le document au dernier rapport de chaque domaine.
 
+.PARAMETER NoEmbedPdf
+    Avec -Pdf, n'embarque pas le PDF dans le HTML. Le fichier .pdf est bien produit,
+    mais le tableau de bord reste léger et son bouton retombe sur l'impression.
+
 .PARAMETER DoNotShow
     N'ouvre rien à la fin de la génération.
 
@@ -74,6 +78,7 @@ param(
     [string]$Logo = "$PSScriptRoot\data\logo.png",
     [switch]$Pdf,
     [switch]$PdfSummary,
+    [switch]$NoEmbedPdf,
     [switch]$DoNotShow
 )
 
@@ -462,7 +467,11 @@ function New-Dashboard {
     param(
         [Parameter(Mandatory)][array]$Domains,
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$PageTitle
+        [Parameter(Mandatory)][string]$PageTitle,
+        # PDF embarqué (base64) : rend le bouton « Télécharger le PDF » opérationnel
+        [string]$PdfBase64 = '',
+        [string]$PdfFileName = '',
+        [switch]$Quiet
     )
 
     $payload = [PSCustomObject]@{
@@ -478,41 +487,66 @@ function New-Dashboard {
         Replace('__PCD_FONTS__', $fontCss).
         Replace('__PCD_BRAND__', $brandMarkup).
         Replace('__PCD_LOGO__', $logoUri).
+        Replace('__PCD_PDF__', $PdfBase64).
+        Replace('__PCD_PDFNAME__', $PdfFileName).
         Replace('__PCD_DATA__', (ConvertTo-SafeJson -InputObject $payload)).
         Replace('__PCD_APP__', $appJs)
 
     Write-Utf8File -Path $Path -Content $html
-    Write-Host "[>] $Path ($([math]::Round((Get-Item -LiteralPath $Path).Length / 1KB)) Ko)" -ForegroundColor Yellow
+    if (-not $Quiet) {
+        Write-Host "[>] $Path ($([math]::Round((Get-Item -LiteralPath $Path).Length / 1KB)) Ko)" -ForegroundColor Yellow
+    }
     $Path
 }
 
-$generated = @()
-
-if ($SplitPerDomain) {
+# Liste des rapports à produire : un seul consolidé, ou un par domaine.
+$jobs = if ($SplitPerDomain) {
     foreach ($d in $domains) {
         $safe = ($d.name -replace '[^\w\.\-]', '_')
-        $generated += New-Dashboard -Domains @($d) `
-            -Path (Join-Path $OutputPath.FullName "dashboard_$safe.html") `
-            -PageTitle "$Title - $($d.name)"
+        @{
+            Domains = @($d)
+            Path    = Join-Path $OutputPath.FullName "dashboard_$safe.html"
+            Title   = "$Title - $($d.name)"
+        }
     }
 }
 else {
-    $generated += New-Dashboard -Domains $domains `
-        -Path (Join-Path $OutputPath.FullName $FileName) `
-        -PageTitle $Title
+    @{
+        Domains = $domains
+        Path    = Join-Path $OutputPath.FullName $FileName
+        Title   = $Title
+    }
 }
 
-# --------------------------------------------------------------------------- #
-# 7. Export PDF (facultatif)
-# --------------------------------------------------------------------------- #
-
+$generated = @()
 $pdfFiles = @()
-if ($Pdf -or $PdfSummary) {
-    foreach ($html in $generated) {
-        $pdfPath = [System.IO.Path]::ChangeExtension($html, 'pdf')
-        $result = Export-DashboardPdf -HtmlPath $html -PdfPath $pdfPath -SummaryOnly:$PdfSummary
-        if ($result) { $pdfFiles += $result }
-    }
+
+foreach ($job in @($jobs)) {
+
+    $html = New-Dashboard -Domains $job.Domains -Path $job.Path -PageTitle $job.Title
+    $generated += $html
+
+    if (-not ($Pdf -or $PdfSummary)) { continue }
+
+    # --------------------------------------------------------------------- #
+    # Export PDF : le rendu se fait depuis le HTML qu'on vient d'écrire.
+    # --------------------------------------------------------------------- #
+    $pdfPath = [System.IO.Path]::ChangeExtension($html, 'pdf')
+    $result = Export-DashboardPdf -HtmlPath $html -PdfPath $pdfPath -SummaryOnly:$PdfSummary
+    if (-not $result) { continue }
+    $pdfFiles += $result
+
+    if ($NoEmbedPdf) { continue }
+
+    # Seconde passe : on réécrit le HTML avec le PDF embarqué en base64, pour que
+    # le bouton « Télécharger le PDF » livre le fichier sans boîte d'impression.
+    $bytes = [System.IO.File]::ReadAllBytes($result)
+    $null = New-Dashboard -Domains $job.Domains -Path $job.Path -PageTitle $job.Title -Quiet `
+        -PdfBase64 ([Convert]::ToBase64String($bytes)) `
+        -PdfFileName (Split-Path $result -Leaf)
+
+    Write-Host ("[>] {0} ({1} Ko, PDF embarqué)" -f `
+            $html, [math]::Round((Get-Item -LiteralPath $html).Length / 1KB)) -ForegroundColor Yellow
 }
 
 if (-not $DoNotShow) {
