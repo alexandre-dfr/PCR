@@ -153,10 +153,21 @@ function mountChart(host, drawFn) {
     host.innerHTML = drawFn(w);
   };
   // redessin forcé (changement de thème)
-  CHARTS.push(function () { lastW = -1; render(); });
+  var forced = function () { lastW = -1; render(); };
+  forced.host = host;
+
+  // Un même conteneur peut être remonté (bascule d'une entrée de légende) :
+  // on remplace l'ancien montage au lieu d'empiler observateurs et redessins.
+  CHARTS = CHARTS.filter(function (f) { return f.host !== host; });
+  CHARTS.push(forced);
+  if (host.__pcdRo) { host.__pcdRo.disconnect(); }
+
   // le conteneur peut avoir une largeur nulle au premier passage (onglet masqué,
   // fenêtre étroite, impression) : on redessine dès qu'il obtient une largeur.
-  if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
+  if (window.ResizeObserver) {
+    host.__pcdRo = new ResizeObserver(render);
+    host.__pcdRo.observe(host);
+  }
   render();
 }
 
@@ -240,23 +251,29 @@ function lineChart(host, cfg) {
   });
 
   if (cfg.series.length > 1) {
-    var lg = document.createElement("div");
-    lg.className = "legend";
-    lg.innerHTML = cfg.series.map(function (s, i) {
-      return '<span data-i="' + i + '"><i style="background:' + s.color + '"></i>' + esc(s.name) + "</span>";
-    }).join("");
-    host.parentNode.insertBefore(lg, host.nextSibling);
-    lg.addEventListener("click", function (e) {
-      var sp = e.target.closest("span[data-i]");
-      if (!sp) return;
-      var i = +sp.dataset.i;
+    addLegend(host, cfg.series, function (i, off) {
       var paths = host.querySelectorAll("svg > path");
-      sp.classList.toggle("off");
-      var off = sp.classList.contains("off");
       if (paths[i]) paths[i].style.display = off ? "none" : "";
       host.querySelectorAll(".pt.s" + i).forEach(function (c) { c.style.display = off ? "none" : ""; });
     });
   }
+}
+
+/** Légende cliquable sous un graphique. onToggle(index, masqué) applique l'effet. */
+function addLegend(host, series, onToggle) {
+  var lg = document.createElement("div");
+  lg.className = "legend";
+  lg.innerHTML = series.map(function (s, i) {
+    return '<span data-i="' + i + '"><i style="background:' + s.color + '"></i>' + esc(s.name) + "</span>";
+  }).join("");
+  host.parentNode.insertBefore(lg, host.nextSibling);
+  if (!onToggle) return;
+  lg.addEventListener("click", function (e) {
+    var sp = e.target.closest("span[data-i]");
+    if (!sp) return;
+    sp.classList.toggle("off");
+    onToggle(+sp.dataset.i, sp.classList.contains("off"));
+  });
 }
 
 function bindLine(host, cfg, X, m, iw, n) {
@@ -283,14 +300,27 @@ function bindLine(host, cfg, X, m, iw, n) {
 
 /* -------------------------------- bar chart ------------------------------- */
 
+/**
+ * cfg: { items:[{name,value,color}], height, max, suffix, maxBar }
+ * Tient aussi bien 3 barres (Initial/Précédent/Actuel) qu'une série temporelle
+ * d'une vingtaine de rapports : au-delà d'une certaine densité, les valeurs
+ * au-dessus des barres et les libellés d'axe s'effacent, l'infobulle prend le relais.
+ */
 function barChart(host, cfg) {
   var H = cfg.height || 190;
   mountChart(host, function (W) {
-    var m = { t: 16, r: 10, b: 26, l: 38 };
+    var m = { t: 20, r: 12, b: 28, l: 42 };
     var iw = Math.max(20, W - m.l - m.r), ih = H - m.t - m.b;
-    var sc = niceScale(0, Math.max.apply(null, cfg.items.map(function (d) { return d.value; }).concat([1])), 3);
+    var vals = cfg.items.map(function (d) { return d.value || 0; });
+    var sc = cfg.max !== undefined
+      ? { lo: 0, hi: cfg.max, step: cfg.max / Math.min(5, cfg.max), n: Math.min(5, cfg.max) }
+      : niceScale(0, Math.max.apply(null, vals.concat([1])), 4);
     var n = cfg.items.length;
-    var bw = Math.min(64, (iw / n) * 0.55);
+    var slot = iw / n;
+    var bw = Math.min(cfg.maxBar || 58, slot * 0.64);
+    var showVals = bw >= 24;
+    var every = Math.ceil(n / Math.max(1, Math.floor(iw / 76)));
+
     var s = "";
     for (var t = 0; t <= sc.n; t++) {
       var val = sc.lo + sc.step * t;
@@ -300,17 +330,114 @@ function barChart(host, cfg) {
         axisLabel(val, sc.step) + "</text>";
     }
     cfg.items.forEach(function (d, i) {
-      var cx = m.l + (iw / n) * (i + 0.5);
-      var h = Math.max(1, (d.value / sc.hi) * ih);
-      s += '<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + (m.t + ih - h).toFixed(1) + '" width="' + bw.toFixed(1) +
-        '" height="' + h.toFixed(1) + '" rx="4" fill="' + (d.color || "var(--accent)") + '" opacity=".92"/>';
-      s += '<text x="' + cx.toFixed(1) + '" y="' + (m.t + ih - h - 5).toFixed(1) +
-        '" text-anchor="middle" font-size="11" font-weight="650" fill="var(--text)">' + num(d.value) + "</text>";
-      s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 9) + '" text-anchor="middle" font-size="10.5" fill="var(--muted)">' +
-        esc(d.name) + "</text>";
+      var cx = m.l + slot * (i + 0.5);
+      var v = d.value || 0;
+      var h = Math.max(v > 0 ? 2 : 0, (v / sc.hi) * ih);
+      var y = m.t + ih - h;
+      s += '<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
+        '" height="' + h.toFixed(1) + '" rx="4" fill="' + (d.color || "var(--brand)") + '"/>';
+      if (showVals) {
+        s += '<text x="' + cx.toFixed(1) + '" y="' + (y - 6).toFixed(1) +
+          '" text-anchor="middle" font-size="11" font-weight="600" fill="var(--text)">' + num(v) + "</text>";
+      }
+      if (i % every === 0 || i === n - 1) {
+        s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--muted)">' +
+          esc(d.name) + "</text>";
+      }
+      // zone de survol pleine hauteur : la barre seule serait trop fine à viser
+      s += '<rect class="bhit" data-i="' + i + '" x="' + (cx - slot / 2).toFixed(1) + '" y="' + m.t +
+        '" width="' + slot.toFixed(1) + '" height="' + ih + '" fill="transparent"/>';
     });
+
+    setTimeout(function () { bindBars(host, cfg.items, cfg.suffix || ""); }, 0);
     return '<svg viewBox="0 0 ' + W + " " + H + '" height="' + H + '">' + s + "</svg>";
   });
+}
+
+function bindBars(host, items, suffix) {
+  host.querySelectorAll(".bhit").forEach(function (r) {
+    r.addEventListener("mousemove", function (e) {
+      var d = items[+r.dataset.i];
+      showTip(e, '<div class="t">' + esc(d.name) + '</div><div class="r"><i style="background:' +
+        (d.color || "var(--brand)") + '"></i>Valeur<b>' + num(d.value || 0) + suffix + "</b></div>");
+    });
+    r.addEventListener("mouseleave", hideTip);
+  });
+}
+
+/**
+ * Histogramme empilé : une pile par période, une couleur par série.
+ * cfg: { labels:[], series:[{name,color,values:[]}], height, suffix }
+ */
+function stackedBarChart(host, cfg) {
+  var H = cfg.height || 230;
+  var hidden = {};
+  var draw = function () {
+    mountChart(host, function (W) {
+      var m = { t: 18, r: 12, b: 28, l: 42 };
+      var iw = Math.max(20, W - m.l - m.r), ih = H - m.t - m.b;
+      var n = cfg.labels.length;
+      var live = cfg.series.filter(function (s, i) { return !hidden[i]; });
+      var totals = cfg.labels.map(function (_, i) {
+        return sum(live.map(function (s) { return s.values[i] || 0; }));
+      });
+      var sc = niceScale(0, Math.max.apply(null, totals.concat([1])), 4);
+      var slot = iw / n;
+      var bw = Math.min(58, slot * 0.64);
+      var every = Math.ceil(n / Math.max(1, Math.floor(iw / 76)));
+
+      var s = "";
+      for (var t = 0; t <= sc.n; t++) {
+        var val = sc.lo + sc.step * t;
+        var gy = m.t + ih - ((val - sc.lo) / (sc.hi - sc.lo)) * ih;
+        s += '<line x1="' + m.l + '" y1="' + gy.toFixed(1) + '" x2="' + (W - m.r) + '" y2="' + gy.toFixed(1) + '" stroke="var(--grid)"/>';
+        s += '<text x="' + (m.l - 7) + '" y="' + (gy + 3.5).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--muted)">' +
+          axisLabel(val, sc.step) + "</text>";
+      }
+      cfg.labels.forEach(function (lab, i) {
+        var cx = m.l + slot * (i + 0.5);
+        var acc = 0;
+        cfg.series.forEach(function (ser, si) {
+          if (hidden[si]) return;
+          var v = ser.values[i] || 0;
+          if (v <= 0) return;
+          var h = (v / sc.hi) * ih;
+          acc += h;
+          s += '<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + (m.t + ih - acc).toFixed(1) +
+            '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + ser.color + '"/>';
+        });
+        if (totals[i] > 0 && bw >= 24) {
+          s += '<text x="' + cx.toFixed(1) + '" y="' + (m.t + ih - acc - 6).toFixed(1) +
+            '" text-anchor="middle" font-size="11" font-weight="600" fill="var(--text)">' + num(totals[i]) + "</text>";
+        }
+        if (i % every === 0 || i === n - 1) {
+          s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--muted)">' +
+            esc(lab) + "</text>";
+        }
+        s += '<rect class="bhit" data-i="' + i + '" x="' + (cx - slot / 2).toFixed(1) + '" y="' + m.t +
+          '" width="' + slot.toFixed(1) + '" height="' + ih + '" fill="transparent"/>';
+      });
+
+      setTimeout(function () {
+        host.querySelectorAll(".bhit").forEach(function (r) {
+          r.addEventListener("mousemove", function (e) {
+            var i = +r.dataset.i;
+            var rows = cfg.series.map(function (ser, si) {
+              if (hidden[si]) return "";
+              return '<div class="r"><i style="background:' + ser.color + '"></i>' + esc(ser.name) +
+                "<b>" + num(ser.values[i] || 0) + (cfg.suffix || "") + "</b></div>";
+            }).join("");
+            showTip(e, '<div class="t">' + esc(cfg.labels[i]) + " · " + num(totals[i]) + " au total</div>" + rows);
+          });
+          r.addEventListener("mouseleave", hideTip);
+        });
+      }, 0);
+
+      return '<svg viewBox="0 0 ' + W + " " + H + '" height="' + H + '">' + s + "</svg>";
+    });
+  };
+  draw();
+  addLegend(host, cfg.series, function (i, off) { hidden[i] = off; draw(); });
 }
 
 /* --------------------------------- donut --------------------------------- */
@@ -536,12 +663,13 @@ function viewDomain(d) {
   var prev = reports.length > 1 ? reports[reports.length - 2] : null;
   var first = reports[0];
   var labels = reports.map(function (r) { return r.label; });
-  var html = "";
+  var html = reportStrip(d);
 
   /* ---- KPI ---- */
   var tp = totalPoints(last), tpPrev = prev ? totalPoints(prev) : null;
   var solvedAll = solvedRules(first, last);
   var newSince = newRules(prev, last);
+  html += '<div class="section-title">Synthèse · dernier rapport</div>';
   html += '<div class="grid g6">' +
     kpi("Score global", '<span style="color:' + scoreColor(last.scores.global) + '">' + last.scores.global + "</span>", "/100",
       prev ? delta(last.scores.global, prev.scores.global) + " vs précédent" : "premier rapport") +
@@ -559,23 +687,24 @@ function viewDomain(d) {
   /* ---- trend ---- */
   html += '<div class="section-title">Tendances</div>';
   html += chartCard("Total de points (non plafonné)", "Somme des 4 catégories · plus bas = mieux", function (h) {
-    lineChart(h, {
-      labels: labels, area: true, height: 250,
-      series: [{ name: "Points", color: "var(--accent)", values: reports.map(totalPoints) }],
-      suffix: " pts"
+    barChart(h, {
+      height: 250, suffix: " pts",
+      items: reports.map(function (r) { return { name: r.label, value: totalPoints(r) }; })
     });
   });
 
   html += '<div class="grid g2" style="margin-top:16px">';
   html += chartCard("Niveau de maturité ANSSI", "plus haut = mieux", function (h) {
-    lineChart(h, {
-      labels: labels, min: 0, max: 5, height: 230,
-      series: [{ name: "Maturité", color: "var(--l4)", step: true, values: reports.map(function (r) { return r.maturity; }) }]
+    barChart(h, {
+      height: 230, max: 5,
+      items: reports.map(function (r) {
+        return { name: r.label, value: r.maturity || 0, color: lvColor(r.maturity) };
+      })
     });
   });
   html += HAS_LEVELS
-    ? chartCard("Règles déclenchées par criticité", "nombre de règles", function (h) {
-      lineChart(h, {
+    ? chartCard("Règles déclenchées par criticité", "empilées par niveau", function (h) {
+      stackedBarChart(h, {
         labels: labels, height: 230,
         series: [1, 2, 3, 4, 5].map(function (l) {
           return { name: "Niveau " + l, color: LV_COLORS[l - 1], values: reports.map(function (r) { return lvCount(r, l); }) };
@@ -583,9 +712,9 @@ function viewDomain(d) {
       });
     })
     : chartCard("Règles déclenchées", "nombre total de règles", function (h) {
-      lineChart(h, {
-        labels: labels, height: 230,
-        series: [{ name: "Règles", color: "var(--accent)", values: reports.map(function (r) { return r.rules.length; }) }]
+      barChart(h, {
+        height: 230,
+        items: reports.map(function (r) { return { name: r.label, value: r.rules.length }; })
       });
     });
   html += "</div>";
@@ -593,10 +722,9 @@ function viewDomain(d) {
   html += '<div class="section-title">Évolution par catégorie</div><div class="grid g2">';
   CATS.forEach(function (c) {
     html += chartCard(c.label, c.desc, function (h) {
-      lineChart(h, {
-        labels: labels, area: true, height: 200,
-        series: [{ name: "Points", color: "var(--accent)", values: reports.map(function (r) { return catPoints(r, c.key); }) }],
-        suffix: " pts"
+      barChart(h, {
+        height: 200, suffix: " pts",
+        items: reports.map(function (r) { return { name: r.label, value: catPoints(r, c.key) }; })
       });
     });
   });
@@ -1103,7 +1231,7 @@ function route() {
     if (!dd) { location.hash = "#/d/0"; return; }
     crumb.textContent = "Domaine";
     title.textContent = dd.name;
-    view.innerHTML = viewDomain(dd) + tabsFooter(dd);
+    view.innerHTML = viewDomain(dd);
   } else {
     location.hash = PCD.domains.length > 1 ? "#/global" : "#/d/0";
     return;
@@ -1116,14 +1244,16 @@ function route() {
   window.scrollTo(0, 0);
 }
 
-function tabsFooter(d) {
-  return '<div class="section-title">Rapports détaillés</div>' +
+/** Frise des rapports, en tête de la vue domaine : c'est le point d'entrée vers
+ *  le détail de chaque passe PingCastle. */
+function reportStrip(d) {
+  return '<div class="report-strip"><div class="section-title">Rapports détaillés</div>' +
     '<div class="timeline">' + d.reports.map(function (x, i) {
       return '<div class="tl-item" data-go="#/d/' + d.i + "/r/" + i + '">' +
         '<div class="d">' + esc(x.label) + "</div>" +
         '<div class="p"><span style="color:' + scoreColor(x.scores.global) + ';font-weight:700">' + x.scores.global +
         "</span> · " + num(totalPoints(x)) + " pts</div></div>";
-    }).join("") + "</div>";
+    }).join("") + "</div></div>";
 }
 
 /* ============================== bootstrap ============================== */

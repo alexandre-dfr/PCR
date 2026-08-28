@@ -102,16 +102,23 @@ lorsque l'historique couvre moins de deux mois (le mois au-delà).
 
 ### Vue « domaine » — l'évolution dans le temps
 
-C'est le cœur de l'outil. Chaque point de chaque courbe correspond à un rapport PingCastle.
+C'est le cœur de l'outil, et la page d'accueil. **Une barre = un rapport PingCastle.**
 
 | Bloc | Contenu |
 |---|---|
-| **Bandeau KPI** | Score global, points cumulés, maturité ANSSI, règles déclenchées, règles résolues au total, nouvelles règles — chacun avec son écart vs le rapport précédent |
-| **Tendances** | Total de points non plafonné, niveau de maturité, nombre de règles par criticité (N1→N5) |
+| **Rapports détaillés** | La frise des rapports, en tête de page : un clic ouvre le détail d'une passe |
+| **Synthèse** | Score global, points cumulés, maturité ANSSI, règles déclenchées, règles résolues au total, nouvelles règles — chacun avec son écart vs le rapport précédent |
+| **Tendances** | Total de points non plafonné, niveau de maturité, et les règles déclenchées en **barres empilées par criticité** (N1→N5) |
 | **Évolution par catégorie** | Anomalies, Comptes à privilèges, Objets obsolètes, Approbations |
 | **Historique** | Un tableau ligne = un rapport, avec tous les scores |
 | **Évolution des règles** | La matrice `RiskId` × date — voir ci-dessous |
 | **Remédiations** | Toutes les règles résolues depuis le premier rapport, avec leur date de dernière apparition |
+
+Les tendances sont en **histogrammes** plutôt qu'en courbes : sur une poignée de rapports,
+comparer des hauteurs se lit plus vite qu'une ligne, et la valeur est écrite au-dessus de
+chaque barre. Au-delà d'une vingtaine de rapports, les étiquettes s'effacent
+automatiquement et le survol prend le relais. La vue globale multi-domaines, elle, reste en
+courbes : c'est la forme qui permet de superposer plusieurs domaines sans les confondre.
 
 La **matrice d'évolution** est le tableau qui répond à « qu'est-ce qui a bougé, et quand ? ».
 Une ligne par règle jamais déclenchée sur la période, une colonne par rapport, la valeur
@@ -130,8 +137,8 @@ N2     A-Krbtgt                 20        ·        ·        ·        ·      
 
 ### Vue « rapport » — la photo à une date donnée
 
-Accessible via la frise chronologique en bas de la vue domaine, ou depuis n'importe quelle
-vue rapport. Elle contient :
+Accessible via la frise « Rapports détaillés » en haut de la vue domaine, ou depuis
+n'importe quelle vue rapport. Elle contient :
 
 - les informations du rapport (version PingCastle, âge, niveaux fonctionnels, nombre de DC) ;
 - la jauge de score global et la répartition des règles par criticité ;
@@ -168,6 +175,7 @@ qui laisserait croire à un score parfait.
 | `-SplitPerDomain` | *(désactivé)* | Un fichier `dashboard_<domaine>.html` par domaine |
 | `-Pdf` | *(désactivé)* | Produit aussi le PDF complet à côté du HTML |
 | `-PdfSummary` | *(désactivé)* | PDF condensé : couverture, vue globale, évolution par domaine et dernier rapport seulement |
+| `-NoEmbedPdf` | *(désactivé)* | Avec `-Pdf`, n'embarque pas le PDF dans le HTML : le fichier `.pdf` est produit, mais le tableau de bord reste léger |
 | `-Logo` | `.\data\logo.png` | Logo affiché dans le bandeau et sur la couverture du PDF |
 | `-ExceptionsFile` | `.\data\exceptions.csv` | Règles à exclure du calcul |
 | `-RulesFile` | `.\data\HCRules.csv` | Référentiel des criticités |
@@ -232,8 +240,14 @@ Si le tableau de bord doit rester léger — publication sur un partage, envoi p
 .\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf -NoEmbedPdf
 ```
 
-`-PdfSummary` est l'autre levier : 13 pages au lieu de 55, donc un HTML embarqué autour de
-1,2 Mo.
+`-PdfSummary` est l'autre levier : 13 pages au lieu de 55, soit un HTML de 1,4 Mo.
+
+| Mode | HTML | PDF produit |
+|---|---|---|
+| *(aucun)* | 247 Ko | — |
+| `-Pdf` | 3,4 Mo | 2,3 Mo · 55 pages |
+| `-Pdf -NoEmbedPdf` | 247 Ko | 2,3 Mo · 55 pages |
+| `-PdfSummary` | 1,4 Mo | 0,9 Mo · 13 pages |
 
 ### Ce que contient le PDF
 
@@ -241,8 +255,8 @@ Le document est linéaire et paginé en A4, pas une capture du tableau de bord :
 
 1. **une page de couverture** — logo, périmètre, période couverte, date de génération ;
 2. **la vue globale**, si plusieurs domaines sont suivis ;
-3. **pour chaque domaine** : la page d'évolution complète (KPI, courbes, matrice des règles,
-   remédiations) ;
+3. **pour chaque domaine** : la page d'évolution complète (KPI, histogrammes, matrice des
+   règles, remédiations) ;
 4. **pour chaque domaine** : le détail de chacun de ses rapports.
 
 Les tableaux y sont **dépaginés** — aucune ligne n'est masquée, contrairement à l'affichage
@@ -380,9 +394,9 @@ Windows PowerShell 5.1 lise correctement les accents. Conservez le BOM si vous l
   au-dessus des grands tableaux.
 - **Graphiques interactifs** — survol pour la valeur exacte, clic sur une entrée de légende
   pour masquer une série.
-- **Impression / PDF** — bouton « Imprimer / PDF » (destination *Enregistrer au format
-  PDF* dans la boîte d'impression), ou `-Pdf` en ligne de commande pour un fichier écrit
-  directement sur le disque.
+- **Téléchargement du PDF** — avec `-Pdf`, le bouton « Télécharger le PDF » livre le
+  fichier en un clic, sans boîte d'impression. Sinon le bouton devient « Imprimer / PDF »
+  et ouvre l'impression du navigateur (destination *Enregistrer au format PDF*).
 
 ## Crédits
 
