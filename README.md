@@ -209,9 +209,15 @@ Le PDF est déposé à côté du HTML (`output\PingCastleDashboard.pdf`). Le ren
 il n'y a donc rien à ajouter sur le poste. Si aucun des deux navigateurs n'est trouvé, le
 script le signale et le HTML reste évidemment exploitable.
 
-**Depuis le tableau de bord** — le bouton « Exporter en PDF » en haut à droite bascule la
-page en document paginé puis ouvre la boîte d'impression du navigateur : choisissez
-*Enregistrer au format PDF*.
+**Depuis le tableau de bord** — le bouton « Imprimer / PDF » en haut à droite bascule la
+page en document paginé, puis ouvre la boîte d'impression du navigateur : choisissez
+**« Enregistrer au format PDF »** comme destination.
+
+C'est bien une impression, pas un export : aucun navigateur n'autorise une page à écrire
+un fichier PDF sur le disque, la boîte d'impression est le seul chemin. Le bouton le
+rappelle au moment du clic. Pour un vrai PDF déposé sur le disque en une commande, c'est
+`-Pdf` — le script pilote alors Edge en headless, qui fait exactement la même chose sans
+interface.
 
 ### Ce que contient le PDF
 
@@ -358,7 +364,9 @@ Windows PowerShell 5.1 lise correctement les accents. Conservez le BOM si vous l
   au-dessus des grands tableaux.
 - **Graphiques interactifs** — survol pour la valeur exacte, clic sur une entrée de légende
   pour masquer une série.
-- **Export PDF** — bouton « Exporter en PDF », ou `-Pdf` en ligne de commande.
+- **Impression / PDF** — bouton « Imprimer / PDF » (destination *Enregistrer au format
+  PDF* dans la boîte d'impression), ou `-Pdf` en ligne de commande pour un fichier écrit
+  directement sur le disque.
 
 ## Crédits
 

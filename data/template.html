@@ -238,6 +238,19 @@ td.rat{color:var(--text-2);min-width:240px}
 .tl-item .d{font-size:12px;font-weight:600;color:var(--text)}
 .tl-item .p{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px;margin-top:2px}
 
+/* rappel affiché juste avant l'ouverture de la boîte d'impression */
+.toast{
+  position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);
+  z-index:80;display:flex;align-items:center;gap:11px;max-width:min(560px,92vw);
+  padding:13px 17px;border-radius:var(--r-lg);background:var(--ink);color:#F1F2F5;
+  font-size:12.5px;line-height:1.5;box-shadow:0 12px 34px -12px rgba(0,0,0,.55);
+  opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;
+}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast svg{width:19px;height:19px;flex:0 0 auto;color:#fff}
+.toast b{color:#fff;font-weight:600}
+@media print{.toast{display:none!important}}
+
 .note{font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.6}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:980px){.split{grid-template-columns:1fr}}
@@ -327,7 +340,10 @@ body.print-mode .doc-h .dh-s{font-size:12px;color:var(--muted);margin-left:auto}
       <div><div class="crumb" id="crumb"></div><h2 id="ptitle"></h2></div>
       <div class="spacer"></div>
       <button class="btn" id="theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><span>Thème</span></button>
-      <button class="btn primary" id="printbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 15h6M9 18h4"/></svg><span>Exporter en PDF</span></button>
+      <button class="btn primary" id="printbtn"
+        title="Ouvre la boîte d’impression du navigateur. Choisissez « Enregistrer au format PDF » comme destination.">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z"/></svg>
+        <span>Imprimer / PDF</span></button>
     </div>
     <div class="content">
       <div class="cover" id="cover"></div>
@@ -337,6 +353,11 @@ body.print-mode .doc-h .dh-s{font-size:12px;color:var(--muted);margin-left:auto}
   </div>
 </div>
 <div class="tip" id="tip"></div>
+<div class="toast" id="toast">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+  <span>Dans la boîte d’impression, choisissez <b>« Enregistrer au format PDF »</b> comme destination.<br>
+  Pour un PDF généré directement sur le disque : <b>New-PingCastleDashboard.ps1 -Pdf</b></span>
+</div>
 <script>
 "use strict";
 var PCD = __PCD_DATA__;

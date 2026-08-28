@@ -1158,12 +1158,23 @@ function tabsFooter(d) {
     CHARTS.forEach(function (f) { f(); });
   });
 
+  // Un navigateur ne peut pas écrire un fichier PDF sur le disque : le seul chemin
+  // est sa boîte d'impression, destination « Enregistrer au format PDF ». On le dit
+  // explicitement plutôt que de laisser croire à un export en un clic — celui-là,
+  // c'est New-PingCastleDashboard.ps1 -Pdf qui le fait.
   byId("printbtn").addEventListener("click", function () {
+    var toast = byId("toast");
     buildPrintDocument();
-    var done = function () { window.removeEventListener("afterprint", done); exitPrintDocument(); };
+    toast.classList.add("on");
+
+    var done = function () {
+      window.removeEventListener("afterprint", done);
+      toast.classList.remove("on");
+      exitPrintDocument();
+    };
     window.addEventListener("afterprint", done);
-    // on laisse les graphiques (rendus en différé) se dessiner avant d'ouvrir la boîte d'impression
-    setTimeout(function () { window.print(); }, 700);
+    // laisse les graphiques (rendus en différé) se dessiner, et le rappel s'afficher
+    setTimeout(function () { window.print(); }, 900);
   });
 
   document.addEventListener("click", function (e) {
