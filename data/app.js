@@ -28,8 +28,9 @@ var CATS = [
   { key: "Trusts", label: "Approbations", score: "trust", desc: "Connexions entre deux Active Directory" }
 ];
 var LV_COLORS = ["var(--l1)", "var(--l2)", "var(--l3)", "var(--l4)", "var(--l5)"];
-var PALETTE = ["#7c6cff", "#4f8cff", "#22c55e", "#f97316", "#ef4444", "#38bdf8",
-  "#eab308", "#ec4899", "#14b8a6", "#a855f7"];
+/* Palette de séries, dérivée de la charte Add-On (violet, bleu, rouge…). */
+var PALETTE = ["#3E2C87", "#0095EB", "#D60929", "#2E9E5B", "#E8720C", "#5B45B8",
+  "#00A6A6", "#B5179E", "#E0A800", "#6C757D"];
 
 function lvColor(l) { return (l >= 1 && l <= 5) ? LV_COLORS[l - 1] : "var(--muted)"; }
 function scoreColor(v) {
@@ -383,6 +384,8 @@ function gauge(host, value, label, desc) {
 /* --------------------------------- table --------------------------------- */
 
 var TBL_SEQ = 0;
+/* En mode impression/PDF, aucune ligne ne doit être masquée par la pagination. */
+var PRINT_MODE = false;
 
 /**
  * cfg: { columns:[{key,label,cls,render(row),sort(row),width}], rows:[],
@@ -391,7 +394,7 @@ var TBL_SEQ = 0;
 function tableView(cfg) {
   var id = "tb" + (++TBL_SEQ);
   var state = { q: "", sort: cfg.sort ? cfg.sort[0] : null, dir: cfg.sort ? cfg.sort[1] : 1, page: 0 };
-  var ps = cfg.pageSize || 0;
+  var ps = PRINT_MODE ? 0 : (cfg.pageSize || 0);
 
   function val(row, c) {
     if (c.sort) return c.sort(row);
@@ -479,13 +482,29 @@ function tableView(cfg) {
 
 /* ------------------------- shared column definitions ------------------------ */
 
+/* Vrai dès qu'au moins une règle porte une criticité connue. Sinon les vues
+   ventilées par niveau afficheraient des zéros partout — ce qui se lirait comme
+   « aucun risque » alors que c'est le référentiel qui manque. */
+var HAS_LEVELS = false;
+
+function noLevelsNote() {
+  return '<div class="empty">Criticités indisponibles.<br>' +
+    'Le référentiel <code>data\\HCRules.csv</code> n’a pas pu être lu : relancez ' +
+    '<code>Update-HCRules.ps1</code> pour renseigner les niveaux.</div>';
+}
+
+/** Puce de criticité. Un niveau inconnu (règle absente de HCRules.csv) reste
+ *  discret : un tiret muet, jamais une pastille qui attire l'œil comme un défaut. */
+function levelChip(level) {
+  if (level >= 1 && level <= 5) return '<span class="chip lv' + level + '">N' + level + "</span>";
+  return '<span class="lv-na" title="Criticité inconnue : mettez à jour data\\HCRules.csv ' +
+    'avec Update-HCRules.ps1">—</span>';
+}
+
 var COL_LEVEL = {
   key: "level", label: "Crit.", width: "72px",
   sort: function (r) { return r.level || 9; },
-  render: function (r) {
-    return r.level ? '<span class="chip lv' + r.level + '">N' + r.level + "</span>"
-      : '<span class="chip">?</span>';
-  }
+  render: function (r) { return levelChip(r.level); }
 };
 var COL_ID = { key: "id", label: "RiskId", cls: "rid" };
 var COL_CAT = {
@@ -554,14 +573,21 @@ function viewDomain(d) {
       series: [{ name: "Maturité", color: "var(--l4)", step: true, values: reports.map(function (r) { return r.maturity; }) }]
     });
   });
-  html += chartCard("Règles déclenchées par criticité", "nombre de règles", function (h) {
-    lineChart(h, {
-      labels: labels, height: 230,
-      series: [1, 2, 3, 4, 5].map(function (l) {
-        return { name: "Niveau " + l, color: LV_COLORS[l - 1], values: reports.map(function (r) { return lvCount(r, l); }) };
-      })
+  html += HAS_LEVELS
+    ? chartCard("Règles déclenchées par criticité", "nombre de règles", function (h) {
+      lineChart(h, {
+        labels: labels, height: 230,
+        series: [1, 2, 3, 4, 5].map(function (l) {
+          return { name: "Niveau " + l, color: LV_COLORS[l - 1], values: reports.map(function (r) { return lvCount(r, l); }) };
+        })
+      });
+    })
+    : chartCard("Règles déclenchées", "nombre total de règles", function (h) {
+      lineChart(h, {
+        labels: labels, height: 230,
+        series: [{ name: "Règles", color: "var(--accent)", values: reports.map(function (r) { return r.rules.length; }) }]
+      });
     });
-  });
   html += "</div>";
 
   html += '<div class="section-title">Évolution par catégorie</div><div class="grid g2">';
@@ -587,7 +613,7 @@ function viewDomain(d) {
     { key: "date", label: "Date" },
     {
       key: "maturity", label: "Maturité", cls: "num", width: "84px",
-      render: function (r) { return '<span class="chip lv' + (r.maturity || 5) + '">' + (r.maturity || "—") + "</span>"; }
+      render: function (r) { return levelChip(r.maturity); }
     },
     {
       key: "global", label: "Score global", cls: "num",
@@ -691,26 +717,39 @@ function viewReport(d, idx) {
     "<dt>Contrôleurs de domaine</dt><dd>" + (r.dcCount === null ? "—" : num(r.dcCount)) + "</dd>" +
     "<dt>Niveau fonctionnel domaine</dt><dd>" + esc(r.domainMode || "—") + "</dd>" +
     "<dt>Niveau fonctionnel forêt</dt><dd>" + esc(r.forestMode || "—") + "</dd>" +
-    '<dt>Maturité ANSSI</dt><dd><span class="chip lv' + (r.maturity || 5) + '">Niveau ' + (r.maturity || "?") + "</span></dd>" +
+    "<dt>Maturité ANSSI</dt><dd>" + (r.maturity
+      ? '<span class="chip lv' + r.maturity + '">Niveau ' + r.maturity + "</span>"
+      : '<span class="lv-na">non renseignée</span>') + "</dd>" +
     "</dl>");
   html += chartCard("Score global", "le pire des quatre indicateurs", function (h) {
     gauge(h, r.scores.global, "Score global", "0 = aucun risque détecté");
   });
-  html += chartCard("Répartition par criticité", "nombre de règles déclenchées", function (h) {
-    donut(h, [1, 2, 3, 4, 5].map(function (l) {
-      return { name: "Niveau " + l, value: lvCount(r, l), color: LV_COLORS[l - 1] };
-    }), "règles");
-  });
+  html += HAS_LEVELS
+    ? chartCard("Répartition par criticité", "nombre de règles déclenchées", function (h) {
+      donut(h, [1, 2, 3, 4, 5].map(function (l) {
+        return { name: "Niveau " + l, value: lvCount(r, l), color: LV_COLORS[l - 1] };
+      }), "règles");
+    })
+    : card("Répartition par criticité", null, noLevelsNote());
   html += "</div>";
 
   /* points per criticity */
-  html += '<div class="section-title">Points par niveau de criticité</div><div class="grid g6">';
-  html += kpi("Total", num(tp), "pts", prev ? delta(tp, totalPoints(prev)) + " vs " + prev.label : "premier rapport");
-  [1, 2, 3, 4, 5].forEach(function (l) {
-    html += kpi("Niveau " + l, '<span style="color:' + LV_COLORS[l - 1] + '">' + num(lvPoints(r, l)) + "</span>", "pts",
-      (prev ? delta(lvPoints(r, l), lvPoints(prev, l)) + " " : "") + lvCount(r, l) + " règle(s)");
-  });
-  html += "</div>";
+  if (HAS_LEVELS) {
+    html += '<div class="section-title">Points par niveau de criticité</div><div class="grid g6">';
+    html += kpi("Total", num(tp), "pts", prev ? delta(tp, totalPoints(prev)) + " vs " + prev.label : "premier rapport");
+    [1, 2, 3, 4, 5].forEach(function (l) {
+      html += kpi("Niveau " + l, '<span style="color:' + LV_COLORS[l - 1] + '">' + num(lvPoints(r, l)) + "</span>", "pts",
+        (prev ? delta(lvPoints(r, l), lvPoints(prev, l)) + " " : "") + lvCount(r, l) + " règle(s)");
+    });
+    html += "</div>";
+  }
+  else {
+    html += '<div class="section-title">Total de points</div><div class="grid g3">';
+    html += kpi("Total", num(tp), "pts", prev ? delta(tp, totalPoints(prev)) + " vs " + prev.label : "premier rapport");
+    html += kpi("Règles déclenchées", num(r.rules.length),
+      prev ? delta(r.rules.length, prev.rules.length) + " vs " + prev.label : "premier rapport");
+    html += "</div>";
+  }
 
   /* gauges */
   html += '<div class="section-title">Scores PingCastle</div><div class="grid g4">';
@@ -725,10 +764,11 @@ function viewReport(d, idx) {
   html += '<div class="grid g4">';
   CATS.forEach(function (c) {
     html += chartCard(c.label, null, function (h) {
+      // dégradé de marque : le plus pâle pour le plus ancien
       var items = [];
-      if (idx > 1) items.push({ name: "Initial", value: catPoints(first, c.key), color: "var(--surface-3)" });
-      if (prev) items.push({ name: "Précédent", value: catPoints(prev, c.key), color: "var(--accent-2)" });
-      items.push({ name: "Actuel", value: catPoints(r, c.key), color: "var(--accent)" });
+      if (idx > 1) items.push({ name: "Initial", value: catPoints(first, c.key), color: "#B3A9D6" });
+      if (prev) items.push({ name: "Précédent", value: catPoints(prev, c.key), color: "var(--brand-l)" });
+      items.push({ name: "Actuel", value: catPoints(r, c.key), color: "var(--brand)" });
       barChart(h, { items: items, height: 190 });
     });
   });
@@ -798,17 +838,21 @@ function viewReport(d, idx) {
 
 function viewGlobal() {
   var ds = PCD.domains;
-  var months = uniq([].concat.apply([], ds.map(function (d) {
-    return d.reports.map(function (r) { return r.month; });
+  var unit = PCD.bucketUnit || "mois";
+  // Maille temporelle commune à tous les domaines : jour sur les périodes courtes,
+  // mois au-delà (voir bucketUnit côté PowerShell).
+  var buckets = uniq([].concat.apply([], ds.map(function (d) {
+    return d.reports.map(function (r) { return r.bucket; });
   }))).sort();
 
-  /* one value per (domain, month): latest report of that month */
+  /* une valeur par (domaine, intervalle) : le dernier rapport de l'intervalle */
   function series(d, fn) {
-    return months.map(function (m) {
-      var inMonth = d.reports.filter(function (r) { return r.month === m; });
-      return inMonth.length ? fn(inMonth[inMonth.length - 1]) : null;
+    return buckets.map(function (b) {
+      var inBucket = d.reports.filter(function (r) { return r.bucket === b; });
+      return inBucket.length ? fn(inBucket[inBucket.length - 1]) : null;
     });
   }
+  var bucketNote = "dernier rapport de chaque " + unit;
   var lasts = ds.map(function (d) { return d.reports[d.reports.length - 1]; });
   var html = "";
 
@@ -827,9 +871,9 @@ function viewGlobal() {
     "</div>";
 
   html += '<div class="section-title">Comparaison des domaines</div>';
-  html += chartCard("Total de points par domaine", "dernier rapport de chaque mois · plus bas = mieux", function (h) {
+  html += chartCard("Total de points par domaine", bucketNote + " · plus bas = mieux", function (h) {
     lineChart(h, {
-      labels: months, height: 260, suffix: " pts",
+      labels: buckets, height: 260, suffix: " pts",
       series: ds.map(function (d, i) {
         return { name: d.name, color: PALETTE[i % PALETTE.length], values: series(d, totalPoints) };
       })
@@ -839,7 +883,7 @@ function viewGlobal() {
   html += '<div class="grid g2" style="margin-top:16px">';
   html += chartCard("Niveau de maturité", "plus haut = mieux", function (h) {
     lineChart(h, {
-      labels: months, min: 0, max: 5, height: 230,
+      labels: buckets, min: 0, max: 5, height: 230,
       series: ds.map(function (d, i) {
         return { name: d.name, color: PALETTE[i % PALETTE.length], step: true, values: series(d, function (r) { return r.maturity; }) };
       })
@@ -847,7 +891,7 @@ function viewGlobal() {
   });
   html += chartCard("Règles déclenchées", "nombre de règles", function (h) {
     lineChart(h, {
-      labels: months, height: 230,
+      labels: buckets, height: 230,
       series: ds.map(function (d, i) {
         return { name: d.name, color: PALETTE[i % PALETTE.length], values: series(d, function (r) { return r.rules.length; }) };
       })
@@ -859,7 +903,7 @@ function viewGlobal() {
   CATS.forEach(function (c) {
     html += chartCard(c.label, c.desc, function (h) {
       lineChart(h, {
-        labels: months, height: 210, suffix: " pts",
+        labels: buckets, height: 210, suffix: " pts",
         series: ds.map(function (d, i) {
           return { name: d.name, color: PALETTE[i % PALETTE.length], values: series(d, function (r) { return catPoints(r, c.key); }) };
         })
@@ -888,7 +932,7 @@ function viewGlobal() {
       { key: "age", label: "Âge", cls: "num", render: function (r) { return num(r.age) + " j"; } },
       {
         key: "maturity", label: "Maturité", cls: "num",
-        render: function (r) { return '<span class="chip lv' + (r.maturity || 5) + '">' + (r.maturity || "—") + "</span>"; }
+        render: function (r) { return levelChip(r.maturity); }
       },
       {
         key: "global", label: "Score global", cls: "num",
@@ -935,6 +979,84 @@ function viewGlobal() {
   }));
 
   return html;
+}
+
+/* ====================== document imprimable / export PDF ====================== */
+
+/* ?print=1 : la page se rend sous forme de document linéaire paginé, pour
+   l'impression navigateur comme pour le rendu headless (New-PingCastleDashboard -Pdf).
+   ?all=0 limite le document au dernier rapport de chaque domaine. */
+var PRINT_REQUESTED = /[?&]print=1/.test(location.search);
+var PRINT_ALL_REPORTS = !/[?&]all=0/.test(location.search);
+
+function coverHtml() {
+  var ds = PCD.domains;
+  var all = [].concat.apply([], ds.map(function (d) { return d.reports; }));
+  var labels = all.map(function (r) { return r.label; }).sort();
+  var names = ds.map(function (d) { return esc(d.name); }).join("<br>");
+  var mark = PCD_LOGO
+    ? '<img src="' + PCD_LOGO + '" alt="Add-On">'
+    : '<span class="wordmark" style="font-size:34px">Add<em>-</em>On</span>';
+  return '<div class="c-top">' + mark + "</div>" +
+    '<div class="c-mid">' +
+    '<div class="c-kicker">Rapport de sécurité Active Directory</div>' +
+    "<h1>" + esc(PCD.title) + "</h1>" +
+    '<div class="c-sub">Analyse d’évolution des rapports PingCastle</div>' +
+    '<div class="c-rule"></div>' +
+    '<dl class="kv">' +
+    "<dt>Périmètre</dt><dd>" + ds.length + " domaine(s) · " + all.length + " rapport(s)</dd>" +
+    "<dt>Domaine(s)</dt><dd>" + names + "</dd>" +
+    "<dt>Période couverte</dt><dd>" + esc(labels[0]) + " → " + esc(labels[labels.length - 1]) + "</dd>" +
+    "<dt>Généré le</dt><dd>" + esc(PCD.generated) + "</dd>" +
+    "</dl></div>" +
+    '<div class="c-foot">Document généré automatiquement à partir des rapports PingCastle. ' +
+    "Les totaux de points sont non plafonnés et tiennent compte des exceptions déclarées : " +
+    "ils diffèrent du score PingCastle officiel, plafonné à 100. Diffusion interne.</div>";
+}
+
+function buildPrintDocument() {
+  PRINT_MODE = true;
+  CHARTS = [];
+  document.body.classList.add("print-mode");
+  byId("cover").innerHTML = coverHtml();
+
+  var first = true;
+  var html = "";
+  var section = function (title, sub, body) {
+    html += '<section class="' + (first ? "" : "sec-break") + '">' +
+      '<div class="doc-h"><span class="dh-t">' + esc(title) + "</span>" +
+      (sub ? '<span class="dh-s">' + esc(sub) + "</span>" : "") + "</div>" + body + "</section>";
+    first = false;
+  };
+
+  if (PCD.domains.length > 1) {
+    section("Vue globale", PCD.domains.length + " domaines suivis", viewGlobal());
+  }
+  PCD.domains.forEach(function (d) {
+    var reports = d.reports;
+    section(d.name, "Évolution · " + reports[0].label + " → " + reports[reports.length - 1].label,
+      viewDomain(d));
+    var idx = PRINT_ALL_REPORTS
+      ? reports.map(function (_, i) { return i; })
+      : [reports.length - 1];
+    idx.forEach(function (i) {
+      section(d.name, "Rapport du " + reports[i].label, viewReport(d, i));
+    });
+  });
+
+  byId("view").innerHTML = html;
+  byId("pdffoot").innerHTML = esc(PCD.title) + " · généré le " + esc(PCD.generated) +
+    " · rapports PingCastle · diffusion interne Add-On";
+  byId("crumb").textContent = "";
+  byId("ptitle").textContent = "";
+}
+
+function exitPrintDocument() {
+  PRINT_MODE = false;
+  document.body.classList.remove("print-mode");
+  byId("cover").innerHTML = "";
+  byId("pdffoot").innerHTML = "";
+  route();
 }
 
 /* ============================== router ============================== */
@@ -1009,7 +1131,12 @@ function tabsFooter(d) {
 (function init() {
   PCD.domains.forEach(function (d, i) {
     d.i = i;
-    d.reports.forEach(function (r) { if (!r.ignored) r.ignored = []; });
+    d.reports.forEach(function (r) {
+      if (!r.ignored) r.ignored = [];
+      if (!HAS_LEVELS) {
+        HAS_LEVELS = r.rules.some(function (x) { return x.level >= 1 && x.level <= 5; });
+      }
+    });
   });
 
   byId("sidefoot").innerHTML =
@@ -1018,11 +1145,11 @@ function tabsFooter(d) {
 
   nav();
 
+  // Le thème clair est celui de la charte Add-On : il reste le défaut, y compris
+  // pour l'export PDF. Le mode sombre n'est appliqué que sur choix explicite.
   var saved = null;
   try { saved = localStorage.getItem("pcd-theme"); } catch (e) { }
-  if (saved) document.documentElement.dataset.theme = saved;
-  else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches)
-    document.documentElement.dataset.theme = "light";
+  if (saved && !PRINT_REQUESTED) document.documentElement.dataset.theme = saved;
 
   byId("theme").addEventListener("click", function () {
     var t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -1030,7 +1157,14 @@ function tabsFooter(d) {
     try { localStorage.setItem("pcd-theme", t); } catch (e) { }
     CHARTS.forEach(function (f) { f(); });
   });
-  byId("printbtn").addEventListener("click", function () { window.print(); });
+
+  byId("printbtn").addEventListener("click", function () {
+    buildPrintDocument();
+    var done = function () { window.removeEventListener("afterprint", done); exitPrintDocument(); };
+    window.addEventListener("afterprint", done);
+    // on laisse les graphiques (rendus en différé) se dessiner avant d'ouvrir la boîte d'impression
+    setTimeout(function () { window.print(); }, 700);
+  });
 
   document.addEventListener("click", function (e) {
     var go = e.target.closest("[data-go]");
@@ -1042,6 +1176,8 @@ function tabsFooter(d) {
     clearTimeout(rt);
     rt = setTimeout(function () { CHARTS.forEach(function (f) { f(); }); }, 140);
   });
+
+  if (PRINT_REQUESTED) { buildPrintDocument(); return; }
 
   window.addEventListener("hashchange", route);
   route();

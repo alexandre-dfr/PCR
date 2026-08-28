@@ -1,15 +1,17 @@
 # PCR — PingCastle Trend
 
-Tableau de bord HTML pour suivre **l'évolution d'un Active Directory** dans le temps, à
-partir des rapports XML produits par [PingCastle](https://github.com/netwrix/pingcastle).
+Tableau de bord HTML et rapport PDF pour suivre **l'évolution d'un Active Directory** dans
+le temps, à partir des rapports XML produits par
+[PingCastle](https://github.com/netwrix/pingcastle). Aux couleurs d'**Add-On**.
 
 Vous lancez PingCastle régulièrement (chaque mois, après chaque campagne de remédiation…),
 vous accumulez les `ad_hc_<domaine>_<date>.xml` dans un dossier, et ce script les compare
 entre eux : ce qui s'est amélioré, ce qui s'est dégradé, et ce qui ne bouge pas.
 
 > Réécriture modernisée de [leobouard/PingCastleDashboard](https://github.com/leobouard/PingCastleDashboard).
-> **Aucune dépendance** : ni PSWriteHTML, ni CDN, ni accès Internet. Le HTML généré est
-> autonome — ouvrable hors ligne, envoyable par mail, consultable depuis un partage réseau.
+> **Aucun module PowerShell, aucun CDN, aucun accès Internet.** Le logo et la police Poppins
+> sont embarqués dans le fichier : le HTML généré est autonome — ouvrable hors ligne,
+> envoyable par mail, consultable depuis un partage réseau.
 
 ---
 
@@ -20,6 +22,12 @@ entre eux : ce qui s'est amélioré, ce qui s'est dégradé, et ce qui ne bouge 
 ```
 
 Le rapport est écrit dans `.\output\PingCastleDashboard.html` et s'ouvre dans le navigateur.
+
+Pour produire en plus le rapport PDF :
+
+```powershell
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf
+```
 
 Sans `-XMLPath`, une boîte de dialogue vous laisse sélectionner les fichiers à la main.
 
@@ -44,6 +52,49 @@ Ajoutez, retirez ou remplacez des XML dans le dossier, le tableau de bord suit.
 
 Le tri se fait sur la `GenerationDate` contenue **dans le XML**, pas sur le nom du fichier
 ni sur la date de modification : vous pouvez renommer les fichiers librement.
+
+### Comparer avant / après une remédiation, le jour même
+
+Rien n'oblige à attendre un mois entre deux passes. Deux scans espacés de quelques heures
+fonctionnent exactement pareil — c'est même le meilleur moyen de vérifier qu'une action
+corrective a bien produit l'effet attendu :
+
+```powershell
+# 9h00 — état des lieux
+.\PingCastle.exe --healthcheck --server monbureau.corp.local
+Move-Item .\ad_hc_*.xml C:\PingCastle\historique\
+
+#   … application des correctifs …
+
+# 12h00 — vérification
+.\PingCastle.exe --healthcheck --server monbureau.corp.local
+Move-Item .\ad_hc_*.xml C:\PingCastle\historique\
+
+.\New-PingCastleDashboard.ps1 -XMLPath C:\PingCastle\historique
+```
+
+Le script **détecte tout seul** que plusieurs rapports tombent le même jour et bascule les
+libellés en `yyyy-MM-dd HH:mm`, sinon les deux passes porteraient la même étiquette et se
+superposeraient dans les graphiques et la matrice :
+
+```
+[*] Plusieurs rapports le même jour : l'heure est ajoutée aux libellés
+[+] corp.local     2 rapport(s)  2026-08-28 09:00 → 2026-08-28 12:00
+```
+
+La vue rapport du scan de 12h00 affiche alors directement le résultat de votre matinée :
+les règles passées dans « ✓ Règles résolues », les éventuelles régressions dans
+« ⚠ Nouvelles règles », et le delta en points sur chaque KPI.
+
+Attention toutefois : PingCastle lit l'état de l'annuaire à l'instant du scan. Certains
+indicateurs ne bougeront pas dans la même journée — réplication entre DC, `S-DC-Inactive`
+et les règles fondées sur une ancienneté (mots de passe, comptes dormants) ont besoin de
+temps. Un scan trop rapproché peut donc afficher une règle encore déclenchée alors que le
+correctif est appliqué.
+
+Deux passes le même jour ne posent pas de problème non plus si vous suivez **plusieurs
+domaines** : la vue globale resserre automatiquement sa maille temporelle sur le jour
+lorsque l'historique couvre moins de deux mois (le mois au-delà).
 
 ---
 
@@ -113,11 +164,14 @@ qui laisserait croire à un score parfait.
 | `-OutputPath` | `.\output` | Dossier de destination |
 | `-FileName` | `PingCastleDashboard.html` | Nom du fichier généré |
 | `-Title` | `PingCastle Trend` | Titre de la page |
-| `-DateFormat` | `yyyy-MM-dd` | Format des dates dans les graphiques et tableaux |
+| `-DateFormat` | `yyyy-MM-dd` | Format des dates. L'heure est ajoutée automatiquement si plusieurs rapports tombent le même jour — sauf si vous passez ce paramètre explicitement |
 | `-SplitPerDomain` | *(désactivé)* | Un fichier `dashboard_<domaine>.html` par domaine |
+| `-Pdf` | *(désactivé)* | Produit aussi le PDF complet à côté du HTML |
+| `-PdfSummary` | *(désactivé)* | PDF condensé : couverture, vue globale, évolution par domaine et dernier rapport seulement |
+| `-Logo` | `.\data\logo.png` | Logo affiché dans le bandeau et sur la couverture du PDF |
 | `-ExceptionsFile` | `.\data\exceptions.csv` | Règles à exclure du calcul |
 | `-RulesFile` | `.\data\HCRules.csv` | Référentiel des criticités |
-| `-DoNotShow` | *(désactivé)* | N'ouvre pas le navigateur à la fin |
+| `-DoNotShow` | *(désactivé)* | N'ouvre rien à la fin (PDF ou navigateur) |
 
 Exemples :
 
@@ -133,10 +187,84 @@ Exemples :
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `
-  '-NoProfile -ExecutionPolicy Bypass -File "C:\PCR\New-PingCastleDashboard.ps1" -XMLPath "C:\PingCastle\historique" -OutputPath "\\srv\web$\ad" -DoNotShow'
+  '-NoProfile -ExecutionPolicy Bypass -File "C:\PCR\New-PingCastleDashboard.ps1" -XMLPath "C:\PingCastle\historique" -OutputPath "\\srv\web$\ad" -Pdf -DoNotShow'
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 07:00
 Register-ScheduledTask -TaskName 'PingCastle Dashboard' -Action $action -Trigger $trigger
 ```
+
+---
+
+## Export PDF
+
+Deux chemins mènent au PDF, avec exactement le même rendu.
+
+**Depuis le script** — c'est la voie à privilégier pour une génération planifiée :
+
+```powershell
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf
+```
+
+Le PDF est déposé à côté du HTML (`output\PingCastleDashboard.pdf`). Le rendu est confié à
+**Edge en mode headless** (Chrome sert de repli) : Edge est installé d'office sur Windows,
+il n'y a donc rien à ajouter sur le poste. Si aucun des deux navigateurs n'est trouvé, le
+script le signale et le HTML reste évidemment exploitable.
+
+**Depuis le tableau de bord** — le bouton « Exporter en PDF » en haut à droite bascule la
+page en document paginé puis ouvre la boîte d'impression du navigateur : choisissez
+*Enregistrer au format PDF*.
+
+### Ce que contient le PDF
+
+Le document est linéaire et paginé en A4, pas une capture du tableau de bord :
+
+1. **une page de couverture** — logo, périmètre, période couverte, date de génération ;
+2. **la vue globale**, si plusieurs domaines sont suivis ;
+3. **pour chaque domaine** : la page d'évolution complète (KPI, courbes, matrice des règles,
+   remédiations) ;
+4. **pour chaque domaine** : le détail de chacun de ses rapports.
+
+Les tableaux y sont **dépaginés** — aucune ligne n'est masquée, contrairement à l'affichage
+écran — et les sauts de page tombent entre les sections, jamais au milieu d'une carte.
+
+Comptez environ 8 pages par rapport analysé. Sur le jeu d'exemple : 55 pages pour 1 domaine
+et 7 rapports, 113 pages pour 2 domaines. Pour un livrable de synthèse, `-PdfSummary`
+retient la couverture, la vue globale, l'évolution par domaine et le dernier rapport
+uniquement — 13 pages sur le même jeu.
+
+```powershell
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml -PdfSummary
+```
+
+---
+
+## Identité visuelle
+
+L'interface reprend la charte du site [addon.fr](https://www.addon.fr/) :
+
+| | |
+|---|---|
+| Violet primaire | `#3E2C87` — navigation active, séries de graphiques, boutons |
+| Rouge | `#D60929` — criticité N1, valeurs en dégradation |
+| Bleu | `#0095EB` — criticité N5, liens |
+| Anthracite | `#292B33` — infobulles, titres de couverture |
+| Police | **Poppins** (400/500/600/700), embarquée en base64 |
+
+L'échelle de criticité est ancrée sur ces couleurs : N1 rouge Add-On, N5 bleu Add-On, et
+les niveaux intermédiaires interpolés. Le thème clair est celui de la charte et reste le
+défaut, y compris pour le PDF ; le bouton « Thème » propose un mode sombre dérivé, mémorisé
+dans le navigateur.
+
+Si `data\logo.png` est absent, le rapport bascule sur un logotype typographique
+« Add-On » aux couleurs de la charte — jamais sur une image brisée.
+
+Pour adapter le rendu :
+
+- **le logo** — remplacez `data\logo.png` (une hauteur de 80 px suffit, le fichier est
+  encodé en base64 dans chaque rapport, donc gardez-le léger) ou passez `-Logo` ;
+- **les couleurs** — les variables CSS sont regroupées en tête de `data\template.html`,
+  dans le bloc `:root` ;
+- **la police** — `data\fonts.css` contient les `@font-face` Poppins déjà encodés. Videz ce
+  fichier pour revenir aux polices système, ou remplacez-le par une autre fonte embarquée.
 
 ---
 
@@ -172,8 +300,22 @@ nouvelle version de PingCastle :
 ```
 
 Le script interroge le dépôt GitHub `netwrix/pingcastle`, affiche les différences et met à
-jour le CSV. **Nécessite un accès Internet.** Une règle absente du référentiel s'affiche
-avec la criticité `?` — le reste du tableau de bord reste exploitable.
+jour le CSV. **Nécessite un accès Internet.**
+
+Une règle absente du référentiel s'affiche sans niveau (`—`) et se trie en fin de tableau ;
+le reste du rapport reste exploitable. À chaque génération, le script vous dit combien de
+règles sont dans ce cas :
+
+```
+AVERTISSEMENT : 12 règle(s) sur 48 sans criticité connue : A-DsHeuristicsLDAPSecInterval, …
+Mettez le référentiel à jour avec .\Update-HCRules.ps1
+```
+
+**Si *toutes* vos règles remontent sans criticité**, ce n'est pas votre AD : c'est que
+`data\HCRules.csv` n'a pas été lu. Vérifiez qu'il est bien présent à côté du script — les
+vues ventilées par niveau (donut de répartition, points par criticité) sont alors
+remplacées par un message explicite plutôt que par des zéros, qui se liraient à tort comme
+une absence de risque.
 
 ---
 
@@ -184,37 +326,39 @@ PCR\
 ├── New-PingCastleDashboard.ps1   ← le script principal
 ├── Update-HCRules.ps1            ← rafraîchit le référentiel de criticités
 ├── data\
-│   ├── template.html             ← structure et feuille de style du rapport
-│   ├── app.js                    ← rendu (graphiques SVG, tableaux, navigation)
+│   ├── template.html             ← structure, charte et mise en page PDF
+│   ├── app.js                    ← rendu (graphiques SVG, tableaux, navigation, mode PDF)
+│   ├── fonts.css                 ← Poppins embarquée en base64
+│   ├── logo.png                  ← logo Add-On
 │   ├── HCRules.csv               ← RiskId → niveau de criticité ANSSI
 │   └── exceptions.csv            ← règles à exclure des scores
 ├── xml\                          ← rapports PingCastle (jeu d'exemple fourni)
-└── output\                       ← HTML généré
+└── output\                       ← HTML et PDF générés
 ```
 
-`template.html` et `app.js` sont assemblés dans le fichier final à chaque génération : pour
-retoucher l'apparence ou ajouter un indicateur, on édite ces deux fichiers, jamais le HTML
-de sortie.
+`template.html`, `app.js`, `fonts.css` et `logo.png` sont assemblés dans le fichier final à
+chaque génération : pour retoucher l'apparence ou ajouter un indicateur, on édite ces
+fichiers, jamais le HTML de sortie.
 
 ## Prérequis
 
 - **Windows PowerShell 5.1** ou **PowerShell 7+**
 - Aucun module externe
-- Un navigateur récent (Edge, Chrome, Firefox)
+- Un navigateur récent (Edge, Chrome, Firefox) pour consulter le rapport
+- **Pour `-Pdf` uniquement** : Edge ou Chrome installé — Edge l'est par défaut sur Windows
 
 Les fichiers `.ps1` sont encodés en **UTF-8 avec BOM** : c'est nécessaire pour que
 Windows PowerShell 5.1 lise correctement les accents. Conservez le BOM si vous les modifiez.
 
 ## Interface
 
-- **Thème sombre / clair** — bouton en haut à droite, aligné par défaut sur le thème du
-  système, choix mémorisé dans le navigateur.
+- **Thème clair / sombre** — bouton en haut à droite. Le clair (charte Add-On) est le
+  défaut ; le choix est mémorisé dans le navigateur.
 - **Tableaux triables et filtrables** — clic sur un en-tête pour trier, champ de recherche
   au-dessus des grands tableaux.
 - **Graphiques interactifs** — survol pour la valeur exacte, clic sur une entrée de légende
   pour masquer une série.
-- **Impression / export PDF** — le bouton « Imprimer » applique une mise en page adaptée
-  (navigation masquée, cartes non coupées) ; imprimez vers PDF pour un livrable figé.
+- **Export PDF** — bouton « Exporter en PDF », ou `-Pdf` en ligne de commande.
 
 ## Crédits
 

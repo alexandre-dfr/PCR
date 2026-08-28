@@ -35,11 +35,26 @@
 .PARAMETER RulesFile
     Chemin du CSV des règles PingCastle (criticités). Par défaut : .\data\HCRules.csv
 
+.PARAMETER Logo
+    Logo affiché dans le bandeau et sur la couverture du PDF, embarqué en base64
+    dans le rapport. Par défaut : .\data\logo.png
+
+.PARAMETER Pdf
+    Produit également un rapport PDF paginé à côté du HTML : page de couverture,
+    vue globale, évolution par domaine et détail de chaque rapport. Le rendu est
+    assuré par Edge (ou Chrome) en mode headless.
+
+.PARAMETER PdfSummary
+    Comme -Pdf, mais limite le document au dernier rapport de chaque domaine.
+
 .PARAMETER DoNotShow
-    N'ouvre pas le rapport dans le navigateur à la fin de la génération.
+    N'ouvre rien à la fin de la génération.
 
 .EXAMPLE
     .\New-PingCastleDashboard.ps1 -XMLPath .\xml
+
+.EXAMPLE
+    .\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf
 
 .EXAMPLE
     .\New-PingCastleDashboard.ps1 -XMLPath \\srv\pingcastle$ -SplitPerDomain -DoNotShow
@@ -56,6 +71,9 @@ param(
     [switch]$SplitPerDomain,
     [string]$ExceptionsFile = "$PSScriptRoot\data\exceptions.csv",
     [string]$RulesFile = "$PSScriptRoot\data\HCRules.csv",
+    [string]$Logo = "$PSScriptRoot\data\logo.png",
+    [switch]$Pdf,
+    [switch]$PdfSummary,
     [switch]$DoNotShow
 )
 
@@ -92,6 +110,100 @@ function Write-Utf8File {
 
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($Path, $Content, $utf8)
+}
+
+function ConvertTo-DataUri {
+    param([string]$Path)
+
+    $ext = [System.IO.Path]::GetExtension($Path).TrimStart('.').ToLowerInvariant()
+    $mime = switch ($ext) {
+        'png' { 'image/png' }
+        'jpg' { 'image/jpeg' }
+        'jpeg' { 'image/jpeg' }
+        'gif' { 'image/gif' }
+        'webp' { 'image/webp' }
+        'svg' { 'image/svg+xml' }
+        default { 'application/octet-stream' }
+    }
+    'data:{0};base64,{1}' -f $mime, [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Path))
+}
+
+function Get-BrowserPath {
+    # Edge est présent par défaut sur Windows ; Chrome sert de repli.
+    $candidates = @(
+        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+    $null
+}
+
+function Export-DashboardPdf {
+    <#
+        Rend le tableau de bord en PDF via Edge/Chrome en mode headless.
+        La page est chargée avec ?print=1, ce qui bascule l'application en
+        document linéaire paginé (page de garde, sauts de page, tableaux complets).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$HtmlPath,
+        [Parameter(Mandatory)][string]$PdfPath,
+        [switch]$SummaryOnly
+    )
+
+    $browser = Get-BrowserPath
+    if (-not $browser) {
+        Write-Warning @'
+Aucun navigateur Edge ou Chrome trouvé : le PDF n'a pas été généré.
+Le HTML reste exploitable — ouvrez-le et utilisez le bouton « Exporter en PDF ».
+'@
+        return $null
+    }
+
+    $uri = ([uri]$HtmlPath).AbsoluteUri + '?print=1'
+    if ($SummaryOnly) { $uri += '&all=0' }
+
+    $userData = Join-Path ([System.IO.Path]::GetTempPath()) ('pcd-' + [guid]::NewGuid().ToString('N'))
+    $arguments = @(
+        '--headless=new'
+        '--disable-gpu'
+        '--no-first-run'
+        '--no-default-browser-check'
+        '--disable-extensions'
+        '--run-all-compositor-stages-before-draw'
+        '--virtual-time-budget=30000'
+        '--no-pdf-header-footer'
+        "--user-data-dir=$userData"
+        "--print-to-pdf=$PdfPath"
+        $uri
+    )
+
+    if (Test-Path -LiteralPath $PdfPath) { Remove-Item -LiteralPath $PdfPath -Force }
+
+    Write-Host "[*] Rendu PDF via $(Split-Path $browser -Leaf)…" -ForegroundColor Cyan
+    try {
+        $process = Start-Process -FilePath $browser -ArgumentList $arguments -NoNewWindow -PassThru
+        if (-not $process.WaitForExit(180000)) {
+            $process.Kill()
+            Write-Warning 'Le rendu PDF a dépassé 3 minutes et a été interrompu.'
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $userData -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path -LiteralPath $PdfPath) {
+        $size = [math]::Round((Get-Item -LiteralPath $PdfPath).Length / 1KB)
+        Write-Host "[>] $PdfPath ($size Ko)" -ForegroundColor Yellow
+        return $PdfPath
+    }
+
+    Write-Warning "Le PDF n'a pas été produit. Ouvrez le HTML et utilisez le bouton « Exporter en PDF »."
+    $null
 }
 
 # Niveaux fonctionnels AD, indexés par la valeur du XML PingCastle
@@ -131,10 +243,23 @@ if (Test-Path -LiteralPath $RulesFile) {
     Import-Csv -Path $RulesFile -Delimiter ';' -Encoding UTF8 | ForEach-Object {
         if ($_.RiskId) { $ruleLevel[$_.RiskId] = [int]$_.Level }
     }
-    Write-Host "[*] $($ruleLevel.Count) règles connues chargées depuis HCRules.csv" -ForegroundColor Cyan
+    if ($ruleLevel.Count) {
+        Write-Host "[*] $($ruleLevel.Count) règles connues chargées depuis HCRules.csv" -ForegroundColor Cyan
+    }
+    else {
+        Write-Warning @"
+'$RulesFile' n'a produit aucune règle exploitable.
+Le fichier doit être un CSV à séparateur point-virgule avec les colonnes RiskId;Level.
+Sans lui, toutes les criticités s'afficheront comme inconnues.
+"@
+    }
 }
 else {
-    Write-Warning "Fichier de règles introuvable ($RulesFile) : les criticités ne seront pas affichées."
+    Write-Warning @"
+Fichier de règles introuvable : '$RulesFile'
+Toutes les criticités s'afficheront comme inconnues. Récupérez data\HCRules.csv,
+ou régénérez-le avec .\Update-HCRules.ps1
+"@
 }
 
 $exceptions = @()
@@ -221,6 +346,33 @@ if (-not $reports) { throw 'Aucun rapport PingCastle exploitable trouvé.' }
 $reports = @($reports)
 
 # --------------------------------------------------------------------------- #
+# 3b. Granularité des libellés et de l'axe temporel
+# --------------------------------------------------------------------------- #
+
+# Plusieurs passes le même jour (avant / après une remédiation) : sans l'heure,
+# les rapports porteraient le même libellé et se superposeraient dans les
+# graphiques et la matrice d'évolution.
+if (-not $PSBoundParameters.ContainsKey('DateFormat')) {
+    $collisions = $reports | Group-Object -Property domain, label | Where-Object { $_.Count -gt 1 }
+    if ($collisions) {
+        $DateFormat = "$DateFormat HH:mm"
+        foreach ($report in $reports) { $report.label = Get-Date $report.date -Format $DateFormat }
+        Write-Host "[*] Plusieurs rapports le même jour : l'heure est ajoutée aux libellés" -ForegroundColor Cyan
+    }
+}
+
+# La vue globale (multi-domaines) doit regrouper les rapports dans des intervalles
+# communs pour superposer les courbes. On resserre la maille sur les périodes
+# courtes, sans quoi tout se retrouverait dans un unique point mensuel.
+$dates = $reports.date | Sort-Object
+$spanDays = ($dates[-1] - $dates[0]).TotalDays
+$bucketUnit = if ($spanDays -lt 62) { 'jour' } else { 'mois' }
+$bucketFormat = if ($bucketUnit -eq 'jour') { 'yyyy-MM-dd' } else { 'yyyy-MM' }
+foreach ($report in $reports) {
+    $report | Add-Member -NotePropertyName bucket -NotePropertyValue (Get-Date $report.date -Format $bucketFormat) -Force
+}
+
+# --------------------------------------------------------------------------- #
 # 4. Exceptions : on sort les règles exclues du calcul
 # --------------------------------------------------------------------------- #
 
@@ -253,6 +405,20 @@ foreach ($d in $domains) {
             $d.name, $d.reports.Count, $d.reports[0].label, $d.reports[-1].label) -ForegroundColor Green
 }
 
+# Une règle sans criticité connue s'affiche « — » dans le rapport. C'est presque
+# toujours le signe d'un HCRules.csv en retard sur la version de PingCastle utilisée.
+$seenIds = $reports.rules.id | Sort-Object -Unique
+$unknown = @($seenIds | Where-Object { -not $ruleLevel.ContainsKey($_) })
+if ($unknown.Count) {
+    $sample = ($unknown | Select-Object -First 5) -join ', '
+    if ($unknown.Count -gt 5) { $sample += ", …" }
+    Write-Warning @"
+$($unknown.Count) règle(s) sur $(($seenIds | Measure-Object).Count) sans criticité connue : $sample
+Ces règles apparaîtront sans niveau (—) et se trieront en fin de tableau.
+Mettez le référentiel à jour avec .\Update-HCRules.ps1
+"@
+}
+
 # --------------------------------------------------------------------------- #
 # 6. Rendu HTML
 # --------------------------------------------------------------------------- #
@@ -264,6 +430,29 @@ foreach ($f in @($templateFile, $appFile)) {
 }
 $template = [System.IO.File]::ReadAllText($templateFile, [System.Text.Encoding]::UTF8)
 $appJs = [System.IO.File]::ReadAllText($appFile, [System.Text.Encoding]::UTF8)
+
+# Police et logo sont embarqués en base64 : le rapport doit rester fidèle à la
+# charte même ouvert hors ligne, sur un poste sans Poppins installée.
+$fontsFile = "$PSScriptRoot\data\fonts.css"
+$fontCss = if (Test-Path -LiteralPath $fontsFile) {
+    [System.IO.File]::ReadAllText($fontsFile, [System.Text.Encoding]::UTF8)
+}
+else {
+    Write-Warning "data\fonts.css absent : repli sur les polices système."
+    ''
+}
+
+if (Test-Path -LiteralPath $Logo) {
+    $logoUri = ConvertTo-DataUri -Path $Logo
+    $brandMarkup = '<img src="{0}" alt="Add-On">' -f $logoUri
+}
+else {
+    # Pas de balise <img> vide : elle afficherait une icône d'image brisée.
+    # On bascule sur un logotype typographique aux couleurs de la charte.
+    Write-Warning "Logo introuvable ($Logo) : repli sur le logotype typographique."
+    $logoUri = ''
+    $brandMarkup = '<span class="wordmark">Add<em>-</em>On</span>'
+}
 
 if (-not (Test-Path -Path $OutputPath.FullName -PathType Container)) {
     $null = New-Item -Path $OutputPath.FullName -ItemType Directory -Force
@@ -280,11 +469,15 @@ function New-Dashboard {
         generated   = Get-Date $now -Format 'dd/MM/yyyy HH:mm'
         title       = $PageTitle
         reportCount = ($Domains.reports | Measure-Object).Count
+        bucketUnit  = $bucketUnit
         domains     = $Domains
     }
 
     $html = $template.
         Replace('__PCD_TITLE__', [System.Net.WebUtility]::HtmlEncode($PageTitle)).
+        Replace('__PCD_FONTS__', $fontCss).
+        Replace('__PCD_BRAND__', $brandMarkup).
+        Replace('__PCD_LOGO__', $logoUri).
         Replace('__PCD_DATA__', (ConvertTo-SafeJson -InputObject $payload)).
         Replace('__PCD_APP__', $appJs)
 
@@ -309,7 +502,24 @@ else {
         -PageTitle $Title
 }
 
-if (-not $DoNotShow) { $generated | ForEach-Object { Start-Process $_ } }
+# --------------------------------------------------------------------------- #
+# 7. Export PDF (facultatif)
+# --------------------------------------------------------------------------- #
+
+$pdfFiles = @()
+if ($Pdf -or $PdfSummary) {
+    foreach ($html in $generated) {
+        $pdfPath = [System.IO.Path]::ChangeExtension($html, 'pdf')
+        $result = Export-DashboardPdf -HtmlPath $html -PdfPath $pdfPath -SummaryOnly:$PdfSummary
+        if ($result) { $pdfFiles += $result }
+    }
+}
+
+if (-not $DoNotShow) {
+    # Si un PDF a été demandé et produit, c'est lui le livrable qu'on ouvre.
+    $toOpen = if ($pdfFiles.Count) { $pdfFiles } else { $generated }
+    $toOpen | ForEach-Object { Start-Process $_ }
+}
 
 Write-Host ''
-Write-Host "Terminé : $($generated.Count) fichier(s) généré(s) dans $($OutputPath.FullName)" -ForegroundColor Cyan
+Write-Host "Terminé : $($generated.Count) HTML$(if ($pdfFiles.Count) { " + $($pdfFiles.Count) PDF" }) dans $($OutputPath.FullName)" -ForegroundColor Cyan
