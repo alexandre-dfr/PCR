@@ -21,12 +21,14 @@ entre eux : ce qui s'est amélioré, ce qui s'est dégradé, et ce qui ne bouge 
 .\New-PingCastleDashboard.ps1 .\xml
 ```
 
-Le rapport est écrit dans `.\output\PingCastleDashboard.html` et s'ouvre dans le navigateur.
+Vous obtenez **deux fichiers** dans `.\output\` : le tableau de bord
+`PingCastleDashboard.html` et le rapport `PingCastleDashboard.pdf`. Le PDF est aussi
+embarqué dans le HTML, dont le bouton « Ouvrir le PDF » l'affiche en un clic.
 
-Pour produire en plus le rapport PDF :
+Si le PDF ne vous sert pas, `-NoPdf` accélère la génération :
 
 ```powershell
-.\New-PingCastleDashboard.ps1 .\xml -Pdf
+.\New-PingCastleDashboard.ps1 .\xml -NoPdf
 ```
 
 Avec `-XMLPath`, sélection automatique des XML dans le dossier XML.
@@ -173,9 +175,10 @@ qui laisserait croire à un score parfait.
 | `-Title` | `PingCastle Trend` | Titre de la page |
 | `-DateFormat` | `yyyy-MM-dd` | Format des dates. L'heure est ajoutée automatiquement si plusieurs rapports tombent le même jour — sauf si vous passez ce paramètre explicitement |
 | `-SplitPerDomain` | *(désactivé)* | Un fichier `dashboard_<domaine>.html` par domaine |
-| `-Pdf` | *(désactivé)* | Produit aussi le PDF complet à côté du HTML |
+| `-NoPdf` | *(désactivé)* | Ne produit aucun PDF. Le bouton du rapport retombe alors sur l'impression |
 | `-PdfSummary` | *(désactivé)* | PDF condensé : couverture, vue globale, évolution par domaine et dernier rapport seulement |
-| `-NoEmbedPdf` | *(désactivé)* | Avec `-Pdf`, n'embarque pas le PDF dans le HTML : le fichier `.pdf` est produit, mais le tableau de bord reste léger |
+| `-NoEmbedPdf` | *(désactivé)* | N'embarque pas le PDF dans le HTML : le fichier `.pdf` est produit, mais le tableau de bord reste léger |
+| `-Pdf` | *(sans effet)* | Le PDF est produit par défaut. Conservé pour ne pas casser les commandes existantes |
 | `-Logo` | `.\data\logo.png` | Logo affiché dans le bandeau et sur la couverture du PDF |
 | `-ExceptionsFile` | `.\data\exceptions.csv` | Règles à exclure du calcul |
 | `-RulesFile` | `.\data\HCRules.csv` | Référentiel des criticités |
@@ -195,7 +198,7 @@ Exemples :
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `
-  '-NoProfile -ExecutionPolicy Bypass -File "C:\PCR\New-PingCastleDashboard.ps1" -XMLPath "C:\PingCastle\historique" -OutputPath "\\srv\web$\ad" -Pdf -DoNotShow'
+  '-NoProfile -ExecutionPolicy Bypass -File "C:\PCR\New-PingCastleDashboard.ps1" -XMLPath "C:\PingCastle\historique" -OutputPath "\\srv\web$\ad" -DoNotShow'
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 07:00
 Register-ScheduledTask -TaskName 'PingCastle Dashboard' -Action $action -Trigger $trigger
 ```
@@ -204,50 +207,47 @@ Register-ScheduledTask -TaskName 'PingCastle Dashboard' -Action $action -Trigger
 
 ## Export PDF
 
-Deux chemins mènent au PDF, avec exactement le même rendu.
-
-**Depuis le script** — c'est la voie à privilégier pour une génération planifiée :
+**Le PDF est produit par défaut**, sans drapeau à passer :
 
 ```powershell
-.\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml
 ```
 
-Le PDF est déposé à côté du HTML (`output\PingCastleDashboard.pdf`). Le rendu est confié à
-**Edge en mode headless** (Chrome sert de repli) : Edge est installé d'office sur Windows,
-il n'y a donc rien à ajouter sur le poste. Si aucun des deux navigateurs n'est trouvé, le
-script le signale et le HTML reste évidemment exploitable.
+Il est déposé à côté du HTML (`output\PingCastleDashboard.pdf`) **et** embarqué dedans. Le
+rendu est confié à **Edge en mode headless** (Chrome sert de repli) : Edge est installé
+d'office sur Windows, il n'y a donc rien à ajouter sur le poste. Si aucun des deux
+navigateurs n'est trouvé, le script le signale et le HTML reste exploitable.
 
-**Depuis le tableau de bord** — avec `-Pdf`, le PDF est **embarqué dans le HTML** : le
-bouton « Télécharger le PDF » en haut à droite dépose directement le fichier dans vos
-téléchargements. Pas de boîte d'impression, pas de destination à choisir. C'est le même
-fichier, au bit près, que celui écrit dans `output\`.
+Dans le tableau de bord, le bouton **« Ouvrir le PDF »** en haut à droite l'affiche
+directement dans le lecteur du navigateur, d'où vous pouvez l'enregistrer ou l'imprimer.
+Pas de boîte d'impression, pas de destination à choisir. C'est le même fichier, au bit
+près, que celui écrit dans `output\`. Le bouton « Imprimer » disparaît alors : le lecteur
+PDF fait déjà les deux, et deux boutons voisins prêtaient à confusion.
 
-Ce bouton n'apparaît que si le rapport a été généré avec `-Pdf`. Sans lui, le HTML ne
-contient aucun PDF à livrer et le bouton retombe sur « Imprimer / PDF », qui ouvre la boîte
-d'impression du navigateur — il faut alors choisir *Enregistrer au format PDF* comme
-destination, ce que le bouton rappelle au moment du clic. Aucune page web ne peut écrire un
-fichier PDF sans passer par là ; c'est pourquoi le PDF est pré-rendu côté script.
+Avec `-NoPdf` ou `-NoEmbedPdf`, le HTML ne contient aucun PDF à ouvrir : le bouton devient
+« Imprimer / PDF » et ouvre la boîte d'impression du navigateur, où il faut choisir
+*Enregistrer au format PDF* comme destination — ce que le bouton rappelle au moment du
+clic. Aucune page web ne peut écrire un fichier PDF sans passer par là ; c'est précisément
+pourquoi le PDF est pré-rendu côté script.
 
 ### Poids du fichier
 
-Embarquer le PDF fait grossir le HTML : 247 Ko à vide, **3,4 Mo** avec le PDF de 55 pages du
-jeu d'exemple. C'est le prix du téléchargement en un clic depuis un fichier autonome.
+Embarquer le PDF fait grossir le HTML : 253 Ko à vide, **3,4 Mo** avec le PDF de 55 pages du
+jeu d'exemple. C'est le prix de l'ouverture en un clic depuis un fichier autonome.
+
+| Mode | HTML | PDF produit | Bouton |
+|---|---|---|---|
+| *(défaut)* | 3,4 Mo | 2,3 Mo · 55 pages | Ouvrir le PDF |
+| `-PdfSummary` | 1,4 Mo | 0,9 Mo · 13 pages | Ouvrir le PDF |
+| `-NoEmbedPdf` | 253 Ko | 2,3 Mo · 55 pages | Imprimer / PDF |
+| `-NoPdf` | 253 Ko | — | Imprimer / PDF |
 
 Si le tableau de bord doit rester léger — publication sur un partage, envoi par mail —
-`-NoEmbedPdf` produit quand même le `.pdf` à côté, mais laisse le HTML à sa taille normale :
+`-NoEmbedPdf` produit quand même le `.pdf` à côté :
 
 ```powershell
-.\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf -NoEmbedPdf
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml -NoEmbedPdf
 ```
-
-`-PdfSummary` est l'autre levier : 13 pages au lieu de 55, soit un HTML de 1,4 Mo.
-
-| Mode | HTML | PDF produit |
-|---|---|---|
-| *(aucun)* | 247 Ko | — |
-| `-Pdf` | 3,4 Mo | 2,3 Mo · 55 pages |
-| `-Pdf -NoEmbedPdf` | 247 Ko | 2,3 Mo · 55 pages |
-| `-PdfSummary` | 1,4 Mo | 0,9 Mo · 13 pages |
 
 ### Ce que contient le PDF
 
@@ -381,7 +381,7 @@ fichiers, jamais le HTML de sortie.
 - **Windows PowerShell 5.1** ou **PowerShell 7+**
 - Aucun module externe
 - Un navigateur récent (Edge, Chrome, Firefox) pour consulter le rapport
-- **Pour `-Pdf` uniquement** : Edge ou Chrome installé — Edge l'est par défaut sur Windows
+- **Pour le PDF** : Edge ou Chrome installé — Edge l'est par défaut sur Windows. Sans lui, seul le HTML est produit
 
 Les fichiers `.ps1` sont encodés en **UTF-8 avec BOM** : c'est nécessaire pour que
 Windows PowerShell 5.1 lise correctement les accents. Conservez le BOM si vous les modifiez.
@@ -394,9 +394,9 @@ Windows PowerShell 5.1 lise correctement les accents. Conservez le BOM si vous l
   au-dessus des grands tableaux.
 - **Graphiques interactifs** — survol pour la valeur exacte, clic sur une entrée de légende
   pour masquer une série.
-- **Téléchargement du PDF** — avec `-Pdf`, le bouton « Télécharger le PDF » livre le
-  fichier en un clic, sans boîte d'impression. Sinon le bouton devient « Imprimer / PDF »
-  et ouvre l'impression du navigateur (destination *Enregistrer au format PDF*).
+- **Ouverture du PDF** — le bouton « Ouvrir le PDF » affiche le rapport dans
+  le lecteur du navigateur, sans boîte d'impression. Avec `-NoPdf`, le bouton devient
+  « Imprimer / PDF » et ouvre l'impression (destination *Enregistrer au format PDF*).
 
 ## Crédits
 

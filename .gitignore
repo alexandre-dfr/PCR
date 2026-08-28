@@ -1,7 +1,7 @@
-﻿# Rapports generes
+# Sorties generees par New-PingCastleDashboard.ps1
 output/
 
-# Rapports PingCastle reels (ne pas versionner les donnees d audit)
-# Le jeu d exemple dans xml/ est volontairement suivi.
-*.html
-!data/template.html
+# Rapports d audit deposes a la racine : ne pas versionner de donnees reelles.
+# Restreint a la racine pour ne pas masquer data/template.html.
+/*.html
+/*.pdf

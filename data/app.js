@@ -1288,23 +1288,39 @@ function reportStrip(d) {
     CHARTS.forEach(function (f) { f(); });
   });
 
-  /* Téléchargement du PDF embarqué : un vrai fichier, sans boîte d'impression.
+  /* PDF embarqué : le bouton l'ouvre directement dans le lecteur du navigateur.
      Le PDF a été rendu par le script au moment de la génération et inséré dans
-     cette page ; on le restitue tel quel via un Blob. */
+     cette page ; on le restitue tel quel via un Blob. Le bouton d'impression
+     disparaît alors — le lecteur PDF offre déjà impression et enregistrement,
+     et deux boutons côte à côte prêtaient à confusion. */
   if (PCD_PDF) {
+    byId("printbtn").style.display = "none";
     var pdfbtn = byId("pdfbtn");
     pdfbtn.style.display = "";
+
+    var pdfUrl = null;
+    var pdfBlobUrl = function () {
+      if (!pdfUrl) {
+        var bin = atob(PCD_PDF);
+        var buf = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        pdfUrl = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
+      }
+      return pdfUrl;
+    };
+
     pdfbtn.addEventListener("click", function () {
-      var bin = atob(PCD_PDF);
-      var buf = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-      var url = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
-      var a = document.createElement("a");
-      a.href = url;
-      a.download = PCD_PDF_NAME || "rapport.pdf";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); a.parentNode.removeChild(a); }, 2000);
+      var url = pdfBlobUrl();
+      // Si l'ouverture d'onglet est bloquée, on retombe sur un téléchargement :
+      // dans les deux cas l'utilisateur repart avec le PDF.
+      if (!window.open(url, "_blank")) {
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = PCD_PDF_NAME || "rapport.pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.parentNode.removeChild(a);
+      }
     });
   }
   else {

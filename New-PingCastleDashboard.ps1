@@ -40,16 +40,20 @@
     dans le rapport. Par défaut : .\data\logo.png
 
 .PARAMETER Pdf
-    Produit également un rapport PDF paginé à côté du HTML : page de couverture,
-    vue globale, évolution par domaine et détail de chaque rapport. Le rendu est
-    assuré par Edge (ou Chrome) en mode headless.
+    Sans effet : le PDF est produit par défaut. Conservé pour ne pas casser les
+    commandes et tâches planifiées existantes.
+
+.PARAMETER NoPdf
+    N'génère aucun PDF. Le tableau de bord reste léger, mais son bouton n'a plus
+    de PDF à ouvrir et retombe sur la boîte d'impression du navigateur.
 
 .PARAMETER PdfSummary
-    Comme -Pdf, mais limite le document au dernier rapport de chaque domaine.
+    Limite le PDF au dernier rapport de chaque domaine, au lieu de détailler
+    chaque passe.
 
 .PARAMETER NoEmbedPdf
-    Avec -Pdf, n'embarque pas le PDF dans le HTML. Le fichier .pdf est bien produit,
-    mais le tableau de bord reste léger et son bouton retombe sur l'impression.
+    N'embarque pas le PDF dans le HTML. Le fichier .pdf est bien produit, mais le
+    tableau de bord reste léger et son bouton retombe sur l'impression.
 
 .PARAMETER DoNotShow
     N'ouvre rien à la fin de la génération.
@@ -57,8 +61,12 @@
 .EXAMPLE
     .\New-PingCastleDashboard.ps1 -XMLPath .\xml
 
+    Produit le tableau de bord HTML et le rapport PDF.
+
 .EXAMPLE
-    .\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf
+    .\New-PingCastleDashboard.ps1 -XMLPath .\xml -NoPdf
+
+    Tableau de bord seul, génération plus rapide.
 
 .EXAMPLE
     .\New-PingCastleDashboard.ps1 -XMLPath \\srv\pingcastle$ -SplitPerDomain -DoNotShow
@@ -77,6 +85,7 @@ param(
     [string]$RulesFile = "$PSScriptRoot\data\HCRules.csv",
     [string]$Logo = "$PSScriptRoot\data\logo.png",
     [switch]$Pdf,
+    [switch]$NoPdf,
     [switch]$PdfSummary,
     [switch]$NoEmbedPdf,
     [switch]$DoNotShow
@@ -521,12 +530,23 @@ else {
 $generated = @()
 $pdfFiles = @()
 
+# Le PDF est produit par défaut : sans lui, le bouton du tableau de bord n'aurait
+# rien à ouvrir et retomberait sur la boîte d'impression du navigateur.
+$wantPdf = -not $NoPdf
+if ($NoPdf -and $PdfSummary) {
+    Write-Warning '-NoPdf et -PdfSummary sont contradictoires : aucun PDF ne sera produit.'
+    $wantPdf = $false
+}
+if ($NoPdf) {
+    Write-Host '[*] PDF désactivé (-NoPdf) : le bouton du rapport ouvrira la boîte d''impression' -ForegroundColor DarkGray
+}
+
 foreach ($job in @($jobs)) {
 
     $html = New-Dashboard -Domains $job.Domains -Path $job.Path -PageTitle $job.Title
     $generated += $html
 
-    if (-not ($Pdf -or $PdfSummary)) { continue }
+    if (-not $wantPdf) { continue }
 
     # --------------------------------------------------------------------- #
     # Export PDF : le rendu se fait depuis le HTML qu'on vient d'écrire.
