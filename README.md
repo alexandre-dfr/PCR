@@ -18,7 +18,7 @@ entre eux : ce qui s'est amélioré, ce qui s'est dégradé, et ce qui ne bouge 
 ## Démarrage rapide
 
 ```powershell
-.\New-PingCastleDashboard.ps1 -XMLPath .\xml
+.\New-PingCastleDashboard.ps1 .\xml
 ```
 
 Le rapport est écrit dans `.\output\PingCastleDashboard.html` et s'ouvre dans le navigateur.
@@ -26,10 +26,10 @@ Le rapport est écrit dans `.\output\PingCastleDashboard.html` et s'ouvre dans l
 Pour produire en plus le rapport PDF :
 
 ```powershell
-.\New-PingCastleDashboard.ps1 -XMLPath .\xml -Pdf
+.\New-PingCastleDashboard.ps1 .\xml -Pdf
 ```
 
-Sans `-XMLPath`, une boîte de dialogue vous laisse sélectionner les fichiers à la main.
+Avec `-XMLPath`, sélection automatique des XML dans le dossier XML.
 
 ### Le workflow au fil de l'eau
 
