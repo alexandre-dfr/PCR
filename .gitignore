@@ -1,0 +1,7 @@
+﻿# Rapports generes
+output/
+
+# Rapports PingCastle reels (ne pas versionner les donnees d audit)
+# Le jeu d exemple dans xml/ est volontairement suivi.
+*.html
+!data/template.html
