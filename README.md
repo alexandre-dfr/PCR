@@ -398,6 +398,40 @@ Windows PowerShell 5.1 lise correctement les accents. Conservez le BOM si vous l
   le lecteur du navigateur, sans boîte d'impression. Avec `-NoPdf`, le bouton devient
   « Imprimer / PDF » et ouvre l'impression (destination *Enregistrer au format PDF*).
 
+## Dépannage
+
+Le script affiche en tête les deux chemins qu'il utilise. C'est la première chose à lire
+quand quelque chose n'arrive pas où vous l'attendez :
+
+```
+[*] Script    : C:\PCR
+[*] Sortie    : C:\PCR\output
+```
+
+**Les fichiers atterrissent dans `C:\output`** — la variable `$PSScriptRoot` était vide,
+ce qui arrive quand le script est collé dans la console, exécuté depuis un éditeur sans
+être enregistré, ou lancé par un hôte PowerShell tiers. Les chemins par défaut devenaient
+alors `\output` et `\data\...`, que Windows résout à la racine du lecteur. Le script
+retombe désormais sur le dossier courant et vous prévient. Pour l'éviter, lancez-le par son
+chemin :
+
+```powershell
+.\New-PingCastleDashboard.ps1 -XMLPath .\xml
+```
+
+**Toutes les criticités affichent `—`** — même cause : `data\HCRules.csv` n'a pas été
+trouvé. Vérifiez la ligne `[*] Script` : le dossier `data\` doit être à côté du script.
+
+**Le logo est remplacé par « Add-On » en texte** — `data\logo.png` est absent, même
+vérification.
+
+**Le bouton ouvre l'impression au lieu du PDF** — le rapport a été généré avec `-NoPdf` ou
+`-NoEmbedPdf`, il n'y a donc pas de PDF embarqué à ouvrir. Relancez sans ces options.
+
+**Vous utilisez peut-être une copie périmée** — si le script a été copié ailleurs, la ligne
+`[*] Script` vous dit laquelle tourne réellement. Les fichiers de `data\` doivent
+accompagner le script : ils sont lus à chaque génération.
+
 ## Crédits
 
 Basé sur le travail de [leobouard](https://github.com/leobouard/PingCastleDashboard) et de

@@ -76,14 +76,14 @@
 [CmdletBinding()]
 param(
     [System.IO.DirectoryInfo]$XMLPath,
-    [System.IO.DirectoryInfo]$OutputPath = "$PSScriptRoot\output",
+    [System.IO.DirectoryInfo]$OutputPath,
     [string]$FileName = 'PingCastleDashboard.html',
     [string]$Title = 'PingCastle Trend',
     [string]$DateFormat = 'yyyy-MM-dd',
     [switch]$SplitPerDomain,
-    [string]$ExceptionsFile = "$PSScriptRoot\data\exceptions.csv",
-    [string]$RulesFile = "$PSScriptRoot\data\HCRules.csv",
-    [string]$Logo = "$PSScriptRoot\data\logo.png",
+    [string]$ExceptionsFile,
+    [string]$RulesFile,
+    [string]$Logo,
     [switch]$Pdf,
     [switch]$NoPdf,
     [switch]$PdfSummary,
@@ -94,11 +94,41 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # --------------------------------------------------------------------------- #
+# 0. Racine du script
+# --------------------------------------------------------------------------- #
+
+# $PSScriptRoot est vide dans certains modes de lancement (script collé dans la
+# console, éditeur, hôte PowerShell tiers). Les chemins par défaut deviennent
+# alors "\data\..." et "\output", que Windows résout à la racine du lecteur
+# courant : les fichiers de données ne sont plus trouvés et la sortie atterrit
+# dans C:\output. On résout donc la racine explicitement, avec des replis.
+$ScriptRoot = $PSScriptRoot
+if (-not $ScriptRoot -and $MyInvocation.MyCommand.Path) {
+    $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if (-not $ScriptRoot) {
+    $ScriptRoot = (Get-Location).Path
+    Write-Warning @"
+Emplacement du script indéterminé : les chemins par défaut seront résolus depuis
+le dossier courant ($ScriptRoot). Si les fichiers de data\ ne sont pas trouvés,
+lancez le script par son chemin — .\New-PingCastleDashboard.ps1 — plutôt qu'en
+collant son contenu dans la console.
+"@
+}
+
+# Chemins par défaut, relatifs au script (résolus ici et non dans param(),
+# où $PSScriptRoot n'est pas fiable).
+if (-not $OutputPath) { $OutputPath = Join-Path $ScriptRoot 'output' }
+if (-not $ExceptionsFile) { $ExceptionsFile = Join-Path $ScriptRoot 'data\exceptions.csv' }
+if (-not $RulesFile) { $RulesFile = Join-Path $ScriptRoot 'data\HCRules.csv' }
+if (-not $Logo) { $Logo = Join-Path $ScriptRoot 'data\logo.png' }
+
+# --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
 
 function Select-XmlFile {
-    param([string]$Directory = $PSScriptRoot)
+    param([string]$Directory = $ScriptRoot)
 
     $null = [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -182,12 +212,16 @@ Le HTML reste exploitable — ouvrez-le et utilisez le bouton « Exporter en PDF
     if ($SummaryOnly) { $uri += '&all=0' }
 
     $userData = Join-Path ([System.IO.Path]::GetTempPath()) ('pcd-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -Path $userData -ItemType Directory -Force
     $arguments = @(
         '--headless=new'
         '--disable-gpu'
         '--no-first-run'
         '--no-default-browser-check'
         '--disable-extensions'
+        '--disable-sync'
+        '--disable-logging'
+        '--log-level=3'
         '--run-all-compositor-stages-before-draw'
         '--virtual-time-budget=30000'
         '--no-pdf-header-footer'
@@ -200,7 +234,11 @@ Le HTML reste exploitable — ouvrez-le et utilisez le bouton « Exporter en PDF
 
     Write-Host "[*] Rendu PDF via $(Split-Path $browser -Leaf)…" -ForegroundColor Cyan
     try {
-        $process = Start-Process -FilePath $browser -ArgumentList $arguments -NoNewWindow -PassThru
+        # Edge écrit sur la console des avertissements sans rapport avec le rendu
+        # (USB, synchronisation, task manager) : on les capture hors de la vue.
+        $process = Start-Process -FilePath $browser -ArgumentList $arguments -NoNewWindow -PassThru `
+            -RedirectStandardOutput (Join-Path $userData 'out.log') `
+            -RedirectStandardError (Join-Path $userData 'err.log')
         if (-not $process.WaitForExit(180000)) {
             $process.Kill()
             Write-Warning 'Le rendu PDF a dépassé 3 minutes et a été interrompu.'
@@ -238,7 +276,7 @@ if ($XMLPath) {
     $xmlFiles = Get-ChildItem -Path $XMLPath.FullName -Filter '*.xml' -Recurse -File
 }
 else {
-    $xmlFiles = Select-XmlFile -Directory $PSScriptRoot | ForEach-Object { Get-Item -LiteralPath $_ }
+    $xmlFiles = Select-XmlFile -Directory $ScriptRoot | ForEach-Object { Get-Item -LiteralPath $_ }
 }
 
 if (-not $xmlFiles) {
@@ -246,6 +284,11 @@ if (-not $xmlFiles) {
     return
 }
 
+# Les chemins par défaut (data\, output\) sont relatifs à l'emplacement du script.
+# On les affiche : c'est la première chose à vérifier si les fichiers n'arrivent
+# pas là où on les attend, ou si une copie périmée du script est utilisée.
+Write-Host "[*] Script    : $ScriptRoot" -ForegroundColor DarkGray
+Write-Host "[*] Sortie    : $($OutputPath.FullName)" -ForegroundColor DarkGray
 Write-Host "[*] $(($xmlFiles | Measure-Object).Count) fichier(s) XML à analyser" -ForegroundColor Cyan
 
 # --------------------------------------------------------------------------- #
@@ -437,8 +480,8 @@ Mettez le référentiel à jour avec .\Update-HCRules.ps1
 # 6. Rendu HTML
 # --------------------------------------------------------------------------- #
 
-$templateFile = "$PSScriptRoot\data\template.html"
-$appFile = "$PSScriptRoot\data\app.js"
+$templateFile = Join-Path $ScriptRoot 'data\template.html'
+$appFile = Join-Path $ScriptRoot 'data\app.js'
 foreach ($f in @($templateFile, $appFile)) {
     if (-not (Test-Path -LiteralPath $f)) { throw "Fichier manquant : $f" }
 }
@@ -447,7 +490,7 @@ $appJs = [System.IO.File]::ReadAllText($appFile, [System.Text.Encoding]::UTF8)
 
 # Police et logo sont embarqués en base64 : le rapport doit rester fidèle à la
 # charte même ouvert hors ligne, sur un poste sans Poppins installée.
-$fontsFile = "$PSScriptRoot\data\fonts.css"
+$fontsFile = Join-Path $ScriptRoot 'data\fonts.css'
 $fontCss = if (Test-Path -LiteralPath $fontsFile) {
     [System.IO.File]::ReadAllText($fontsFile, [System.Text.Encoding]::UTF8)
 }
@@ -570,9 +613,9 @@ foreach ($job in @($jobs)) {
 }
 
 if (-not $DoNotShow) {
-    # Si un PDF a été demandé et produit, c'est lui le livrable qu'on ouvre.
-    $toOpen = if ($pdfFiles.Count) { $pdfFiles } else { $generated }
-    $toOpen | ForEach-Object { Start-Process $_ }
+    # On ouvre le tableau de bord : c'est le livrable principal, et son bouton
+    # « Ouvrir le PDF » donne accès au rapport imprimable.
+    $generated | ForEach-Object { Start-Process $_ }
 }
 
 Write-Host ''
